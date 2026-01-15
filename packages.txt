@@ -3,7 +3,7 @@ dplyr
 tidyverse
 tibble
 
-# Time series (modern alternatives)
+# Time series (modern, secure alternatives)
 tsibble
 timetk
 anomalize
