@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm
+FROM python:3.10.12-clean
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
