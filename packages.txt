@@ -1,12 +1,11 @@
 # Core data manipulation
-plyr
 dplyr
 tidyverse
 tibble
 
-# Time series and anomaly detection
-# tibbletime is archived - using tsibble as modern alternative
+# Time series
 tsibble
+timetk
 anomalize
 
 # Parallel processing

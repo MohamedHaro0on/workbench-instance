@@ -1,48 +1,45 @@
-FROM python:3.10.12-clean
+FROM python:3.12-alpine3.20
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-# Create jupyter user for Workbench compatibility
-RUN useradd -m -s /bin/bash -u 1000 jupyter && \
+# Create jupyter user
+RUN adduser -D -u 1000 jupyter && \
     mkdir -p /home/jupyter && \
     chown -R jupyter:jupyter /home/jupyter
 
-USER root
-
-# Install system dependencies with security updates
-RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends \
-    # R packages - will get latest available in repo
-    r-base \
-    r-base-dev \
-    # Secure versions of libraries
-    libcurl4-openssl-dev \
-    libssl-dev \
+# Install R and system dependencies
+RUN apk update && \
+    apk upgrade && \
+    apk add --no-cache \
+    R \
+    R-dev \
+    curl-dev \
+    openssl-dev \
     libxml2-dev \
-    libfontconfig1-dev \
-    libfreetype6-dev \
+    fontconfig-dev \
+    freetype-dev \
     libpng-dev \
-    libtiff-dev \
-    libjpeg-dev \
-    libharfbuzz-dev \
-    libfribidi-dev \
-    libzmq3-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /var/cache/apt/archives/*
+    tiff-dev \
+    jpeg-dev \
+    harfbuzz-dev \
+    fribidi-dev \
+    zeromq-dev \
+    linux-headers \
+    build-base \
+    libffi-dev \
+    && rm -rf /var/cache/apk/*
 
-# Install JupyterLab with pinned secure versions
+# Install secure Python packages
 RUN pip install --no-cache-dir \
     'jupyterlab>=4.1.0' \
     'notebook>=7.1.0' \
     'jupyter-server-proxy>=4.1.1' \
-    'jupyter-server>=2.12.5' \
-    && rm -rf /root/.cache/pip
+    'jupyter-server>=2.12.5'
 
-# Install IRkernel for Jupyter R support
+# Install IRkernel
 RUN R -e "install.packages('IRkernel', repos='https://cloud.r-project.org')" && \
     R -e "IRkernel::installspec(user = FALSE)"
 
@@ -54,18 +51,15 @@ RUN R -e "packages <- readLines('/tmp/packages.txt'); \
     packages <- packages[packages != '' & !grepl('^#', packages)]; \
     install.packages(packages, repos='https://cloud.r-project.org', dependencies=TRUE, Ncpus=parallel::detectCores())"
 
-# Cleanup
-RUN rm -rf /tmp/* /var/tmp/*
+# Final cleanup
+RUN rm -rf /tmp/* /var/tmp/* /root/.cache
 
-# Expose Jupyter port
 EXPOSE 8080
 
-# Switch to jupyter user
 USER jupyter
 
 WORKDIR /home/jupyter
 
-# Configure Jupyter
 RUN mkdir -p /home/jupyter/.jupyter && \
     echo "c.ServerApp.ip = '0.0.0.0'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
     echo "c.ServerApp.port = 8080" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
