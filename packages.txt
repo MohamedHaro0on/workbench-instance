@@ -5,7 +5,8 @@ tidyverse
 tibble
 
 # Time series and anomaly detection
-tibbletime
+# tibbletime is archived - using tsibble as modern alternative
+tsibble
 anomalize
 
 # Parallel processing

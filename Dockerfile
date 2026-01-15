@@ -11,33 +11,35 @@ RUN useradd -m -s /bin/bash -u 1000 jupyter && \
 
 USER root
 
-# Install R and system dependencies
+# Install system dependencies with security updates
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
+    # R packages - will get latest available in repo
     r-base \
     r-base-dev \
+    # Secure versions of libraries
     libcurl4-openssl-dev \
     libssl-dev \
     libxml2-dev \
     libfontconfig1-dev \
     libfreetype6-dev \
     libpng-dev \
-    libtiff5-dev \
+    libtiff-dev \
     libjpeg-dev \
     libharfbuzz-dev \
     libfribidi-dev \
     libzmq3-dev \
-    git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/cache/apt/archives/*
 
-# Install JupyterLab and dependencies
+# Install JupyterLab with pinned secure versions
 RUN pip install --no-cache-dir \
-    jupyterlab \
-    notebook \
-    jupyter-server-proxy \
+    'jupyterlab>=4.1.0' \
+    'notebook>=7.1.0' \
+    'jupyter-server-proxy>=4.1.1' \
+    'jupyter-server>=2.12.5' \
     && rm -rf /root/.cache/pip
 
 # Install IRkernel for Jupyter R support
