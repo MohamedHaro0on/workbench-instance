@@ -1,0 +1,14 @@
+# Core data manipulation
+plyr
+dplyr
+tidyverse
+tibble
+
+# Time series and anomaly detection
+tibbletime
+anomalize
+
+# Parallel processing
+foreach
+doParallel
+pbapply
