@@ -1,9 +1,10 @@
-# Core data manipulation (actively maintained)
+# Core data manipulation
 dplyr
 tidyverse
 tibble
+plyr
 
-# Time series (modern, secure alternatives)
+# Time series
 tsibble
 timetk
 anomalize
