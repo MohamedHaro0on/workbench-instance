@@ -1,0 +1,17 @@
+{
+  "ServerApp": {
+    "ip": "0.0.0.0",
+    "port": 8080,
+    "open_browser": false,
+    "allow_origin": "*",
+    "token": "",
+    "password": "",
+    "allow_remote_access": true,
+    "allow_root": false,
+    "base_url": "/",
+    "terminado_settings": {
+      "shell_command": ["/bin/bash"]
+    },
+    "root_dir": "/home/jupyter"
+  }
+}

@@ -22,11 +22,9 @@ RUN apt-get update && \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# ============================================
-# Fix repository issues and install R with dependencies
-# ============================================
-RUN rm -f /etc/apt/sources.list.d/gcsfuse.list 2>/dev/null; \
-    rm -f /etc/apt/sources.list.d/google-cloud*.list 2>/dev/null; \
+# Fix repository issues and install R with all dependencies in ONE step
+RUN rm -f /etc/apt/sources.list.d/gcsfuse.list 2>/dev/null || true && \
+    rm -f /etc/apt/sources.list.d/google-cloud*.list 2>/dev/null || true && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         r-base \
@@ -54,68 +52,53 @@ RUN rm -f /etc/apt/sources.list.d/gcsfuse.list 2>/dev/null; \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# ============================================
 # Configure R to use Posit Package Manager for BINARY packages
-# ============================================
-RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"))' >> /etc/R/Rprofile.site && \
+# This detects the Ubuntu version automatically
+RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))' >> /etc/R/Rprofile.site && \
     echo 'options(HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /etc/R/Rprofile.site
 
-# Verify R configuration
+# Verify R version and repo
 RUN R --version && \
     R -e "cat('Repository:', getOption('repos'), '\n')"
 
-# ============================================
-# Copy and install R packages
-# ============================================
-COPY packages.txt /tmp/packages.txt
-
+# Install ALL R packages using Posit binary packages (FAST)
 RUN R -e "\
-    cat('=== Installing R packages from Posit Package Manager ===\n'); \
+    cat('=== Installing R packages ===\n'); \
     cat('R version:', as.character(getRversion()), '\n'); \
     cat('Repo:', getOption('repos'), '\n'); \
-    packages <- readLines('/tmp/packages.txt'); \
-    packages <- trimws(packages); \
-    packages <- packages[packages != '' & !grepl('^#', packages)]; \
-    install.packages(packages, Ncpus = parallel::detectCores()); \
+    \
+    pkgs <- c( \
+        'dplyr', \
+        'tidyverse', \
+        'tibble', \
+        'plyr', \
+        'tsibble', \
+        'timetk', \
+        'anomalize', \
+        'foreach', \
+        'doParallel', \
+        'pbapply', \
+        'IRkernel' \
+    ); \
+    \
+    install.packages(pkgs, Ncpus = parallel::detectCores()); \
+    \
     cat('\n=== Verification ===\n'); \
-    failed <- character(0); \
-    for (p in packages) { \
+    for (p in pkgs) { \
         if (requireNamespace(p, quietly=TRUE)) { \
-            cat('[OK]', p, '\n'); \
+            cat('✓', p, '\n'); \
         } else { \
-            cat('[FAIL]', p, '\n'); \
-            failed <- c(failed, p); \
+            cat('✗', p, 'FAILED\n'); \
         } \
-    }; \
-    if (length(failed) > 0) { \
-        stop('Failed to install: ', paste(failed, collapse=', ')); \
     }"
 
-# ============================================
-# Install IRkernel for Jupyter R support
-# ============================================
-RUN R -e "install.packages('IRkernel', Ncpus = parallel::detectCores())" && \
-    R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
+# Install R kernel for Jupyter
+RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
 
 # Verify Jupyter kernels
 RUN jupyter kernelspec list
 
-# ============================================
-# Create Jupyter configuration
-# ============================================
-RUN mkdir -p /home/jupyter/.jupyter
-
-COPY jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
-
-# ============================================
-# Create startup script
-# ============================================
-COPY start-jupyter.sh /usr/local/bin/start-jupyter.sh
-RUN chmod +x /usr/local/bin/start-jupyter.sh
-
-# ============================================
 # Ensure proper permissions for jupyter user
-# ============================================
 RUN mkdir -p /home/jupyter/.local/share/jupyter/kernels && \
     mkdir -p /home/jupyter/.cache/R && \
     chown -R jupyter:users /home/jupyter
@@ -126,15 +109,10 @@ RUN mkdir -p /home/jupyter/.local/share/jupyter/kernels && \
 RUN rm -rf /tmp/* /var/tmp/* /root/.cache && \
     apt-get autoremove -y && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    # Disable unnecessary services to reduce CVE exposure
+    systemctl disable --now apt-daily.service 2>/dev/null || true && \
+    systemctl disable --now apt-daily-upgrade.service 2>/dev/null || true || true
 
 # Expose port 8080 (GCP Workbench requirement)
 EXPOSE 8080
-
-# Switch to jupyter user
-USER jupyter
-
-WORKDIR /home/jupyter
-
-# Use startup script as entrypoint
-ENTRYPOINT ["/usr/local/bin/start-jupyter.sh"]

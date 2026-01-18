@@ -1,132 +1,202 @@
 # ============================================
-# Stage 1: Build R packages
+# GCP Workbench Compatible Image with R Support
+# Uses Posit Package Manager for BINARY packages
+# Based on Debian Bookworm Slim (glibc-based, smaller footprint)
+# Security hardened version
 # ============================================
-FROM alpine:3.20 AS builder
 
-ENV CFLAGS="-w -O2"
-ENV CXXFLAGS="-w -O2"
+# ============================================
+# Stage 1: Build R packages with Posit binaries
+# ============================================
+FROM debian:bookworm-20250428-slim AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+# Security: Update system packages first
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        gnupg \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add CRAN repository for latest R
+RUN curl -fsSL https://cloud.r-project.org/bin/linux/debian/marutter_pubkey.asc | \
+    gpg --dearmor -o /usr/share/keyrings/cran-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/cran-archive-keyring.gpg] https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" \
+    > /etc/apt/sources.list.d/cran.list
 
 # Install R and build dependencies
-RUN apk update && \
-    apk upgrade && \
-    apk add --no-cache \
-    R \
-    R-dev \
-    curl-dev \
-    openssl-dev \
-    libxml2-dev \
-    fontconfig-dev \
-    freetype-dev \
-    libpng-dev \
-    tiff-dev \
-    jpeg-dev \
-    harfbuzz-dev \
-    fribidi-dev \
-    zeromq-dev \
-    cairo-dev \
-    pango-dev \
-    linux-headers \
-    build-base \
-    pkgconfig
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        r-base \
+        r-base-dev \
+        libcurl4-openssl-dev \
+        libssl-dev \
+        libxml2-dev \
+        libfontconfig1-dev \
+        libfreetype6-dev \
+        libpng-dev \
+        libtiff-dev \
+        libjpeg-dev \
+        libharfbuzz-dev \
+        libfribidi-dev \
+        libzmq3-dev \
+        libcairo2-dev \
+        libxt-dev \
+        libgit2-dev \
+        libssh2-1-dev \
+        pkg-config \
+        make \
+        gcc \
+        g++ \
+        gfortran \
+    && rm -rf /var/lib/apt/lists/*
 
+# Configure Posit Package Manager for Debian Bookworm BINARY packages
+RUN mkdir -p /usr/local/lib/R/site-library && \
+    echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/bookworm/latest"))' >> /etc/R/Rprofile.site && \
+    echo 'options(HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /etc/R/Rprofile.site && \
+    echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
+
+# Copy packages list
 COPY packages.txt /tmp/packages.txt
 
-# Install R packages
-RUN R --quiet -e "\
-    options(warn = -1); \
+# Install R packages from Posit Package Manager (FAST binary install)
+RUN R -e "\
+    cat('=== Installing R packages from Posit Package Manager ===\n'); \
+    cat('R version:', as.character(getRversion()), '\n'); \
+    cat('Repo:', getOption('repos'), '\n'); \
     packages <- readLines('/tmp/packages.txt'); \
     packages <- trimws(packages); \
     packages <- packages[packages != '' & !grepl('^#', packages)]; \
-    install.packages(packages, repos='https://cloud.r-project.org', dependencies=TRUE, Ncpus=parallel::detectCores(), quiet=TRUE)" 2>/dev/null || true
-
-# Install IRkernel R package
-RUN R --quiet -e "install.packages('IRkernel', repos='https://cloud.r-project.org', quiet=TRUE)" 2>/dev/null || true
+    install.packages(packages, lib='/usr/local/lib/R/site-library', Ncpus = parallel::detectCores()); \
+    install.packages('IRkernel', lib='/usr/local/lib/R/site-library', Ncpus = parallel::detectCores()); \
+    cat('\n=== Verification ===\n'); \
+    failed <- character(0); \
+    for (p in c(packages, 'IRkernel')) { \
+        if (requireNamespace(p, quietly=TRUE)) { \
+            cat('[OK]', p, '\n'); \
+        } else { \
+            cat('[FAIL]', p, '\n'); \
+            failed <- c(failed, p); \
+        } \
+    }; \
+    if (length(failed) > 0) { \
+        stop('Failed to install: ', paste(failed, collapse=', ')); \
+    }"
 
 # ============================================
-# Stage 2: Final GCP Workbench Compatible Image
+# Stage 2: Final Runtime Image (minimal)
 # ============================================
-FROM alpine:3.20
+FROM debian:bookworm-20250428-slim
 
+ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV SHELL=/bin/bash
+ENV R_LIBS_SITE=/usr/local/lib/R/site-library
+
+# Security: Update and install minimal runtime dependencies
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        gnupg \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add CRAN repository
+RUN curl -fsSL https://cloud.r-project.org/bin/linux/debian/marutter_pubkey.asc | \
+    gpg --dearmor -o /usr/share/keyrings/cran-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/cran-archive-keyring.gpg] https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" \
+    > /etc/apt/sources.list.d/cran.list
+
+# Install ONLY runtime dependencies (no -dev packages)
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        r-base \
+        libcurl4 \
+        libssl3 \
+        libxml2 \
+        libfontconfig1 \
+        libfreetype6 \
+        libpng16-16 \
+        libtiff6 \
+        libjpeg62-turbo \
+        libharfbuzz0b \
+        libfribidi0 \
+        libzmq5 \
+        libcairo2 \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgit2-1.5 \
+        libssh2-1 \
+        bash \
+        procps \
+        tini \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create jupyter user with GID 100 (users group) - required by GCP Workbench
-RUN addgroup -g 100 users || true && \
-    adduser -D -u 1000 -G users -s /bin/bash jupyter && \
-    mkdir -p /home/jupyter && \
-    chown -R jupyter:users /home/jupyter
+RUN groupadd -g 100 users 2>/dev/null || true && \
+    useradd -m -u 1000 -g users -s /bin/bash jupyter
 
-# Install runtime dependencies
-RUN apk update && \
-    apk upgrade && \
-    apk add --no-cache \
-    python3 \
-    py3-pip \
-    R \
-    curl \
-    openssl \
-    libxml2 \
-    fontconfig \
-    freetype \
-    libpng \
-    tiff \
-    jpeg \
-    harfbuzz \
-    fribidi \
-    zeromq \
-    cairo \
-    pango \
-    ca-certificates \
-    wget \
-    bash \
-    procps
+# Create R library directory and configure
+RUN mkdir -p /usr/local/lib/R/site-library && \
+    echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/bookworm/latest"))' >> /etc/R/Rprofile.site && \
+    echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
 
-# Copy R libraries from builder
-COPY --from=builder /usr/lib/R/library /usr/lib/R/library
+# Copy R libraries from builder stage
+COPY --from=builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 
-# Install Python packages
+# Install Python packages (pinned versions for security)
 RUN pip3 install --no-cache-dir --break-system-packages \
-    'jupyterlab>=4.0.0,<5.0.0' \
-    'notebook>=7.0.0,<8.0.0' \
-    'jupyter-server>=2.0.0,<3.0.0' \
-    'jupyter-server-proxy' \
-    'traitlets'
+    jupyterlab==4.4.1 \
+    notebook==7.4.2 \
+    jupyter-server==2.15.0 \
+    jupyter-server-proxy==4.4.0 \
+    traitlets==5.14.3
 
-# Run IRkernel::installspec
-RUN R --quiet -e "IRkernel::installspec(user = FALSE)" 2>/dev/null || true
+# Install R kernel for Jupyter (system-wide)
+RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
+
+# Verify installations
+RUN R --version && \
+    jupyter kernelspec list && \
+    R -e "cat('IRkernel:', packageVersion('IRkernel'), '\n')"
 
 # Create Jupyter configuration directory
-RUN mkdir -p /home/jupyter/.jupyter && \
-    chown -R jupyter:users /home/jupyter/.jupyter
+RUN mkdir -p /home/jupyter/.jupyter
 
-# GCP Workbench Jupyter configuration
-RUN echo "c.ServerApp.ip = '0.0.0.0'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.port = 8080" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.open_browser = False" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.allow_origin = '*'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.token = ''" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.password = ''" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.allow_remote_access = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.allow_root = False" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.base_url = '/'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.terminado_settings = {'shell_command': ['/bin/bash']}" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    chown jupyter:users /home/jupyter/.jupyter/jupyter_server_config.py
+# Create Jupyter configuration for GCP Workbench
+COPY jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
 
 # Create startup script for GCP Workbench
-RUN echo '#!/bin/bash' > /usr/local/bin/start-jupyter.sh && \
-    echo 'set -e' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'exec jupyter lab --ip=0.0.0.0 --port=8080 --no-browser --ServerApp.token="" --ServerApp.password="" --ServerApp.allow_origin="*" --ServerApp.allow_remote_access=True' >> /usr/local/bin/start-jupyter.sh && \
-    chmod +x /usr/local/bin/start-jupyter.sh
+COPY start-jupyter.sh /usr/local/bin/start-jupyter.sh
+RUN chmod +x /usr/local/bin/start-jupyter.sh
 
-# Cleanup
-RUN rm -rf /tmp/* /var/tmp/* /root/.cache /var/cache/apk/*
+# Security: Final cleanup and hardening
+RUN rm -rf /tmp/* /var/tmp/* /root/.cache && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
 # Set proper permissions
-RUN chmod 755 /home/jupyter && \
-    chown -R jupyter:users /home/jupyter
+RUN mkdir -p /home/jupyter/.local/share/jupyter/kernels \
+             /home/jupyter/.cache/R \
+             /home/jupyter/work && \
+    chown -R jupyter:users /home/jupyter && \
+    chmod 755 /home/jupyter
 
 # Expose port 8080 (required by GCP Workbench)
 EXPOSE 8080
@@ -136,5 +206,8 @@ USER jupyter
 
 WORKDIR /home/jupyter
 
-# Use startup script as entrypoint
-ENTRYPOINT ["/usr/local/bin/start-jupyter.sh"]
+# Use tini as init system for proper signal handling
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# Start Jupyter
+CMD ["/usr/local/bin/start-jupyter.sh"]

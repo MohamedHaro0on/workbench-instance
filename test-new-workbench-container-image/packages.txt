@@ -1,10 +1,10 @@
-# Core tidyverse packages
+# Core data manipulation
 dplyr
 tidyverse
 tibble
 plyr
 
-# Time series packages
+# Time series
 tsibble
 timetk
 anomalize
