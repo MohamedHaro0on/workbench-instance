@@ -1,15 +1,11 @@
-# Core tidyverse packages
+# R packages for GCP Workbench
 dplyr
 tidyverse
 tibble
 plyr
-
-# Time series packages
 tsibble
 timetk
 anomalize
-
-# Parallel processing
 foreach
 doParallel
 pbapply

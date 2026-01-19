@@ -1,20 +1,19 @@
 # ============================================
 # GCP Workbench Compatible Image with R Support
-# Uses Posit Package Manager for BINARY packages
-# Based on Debian Bookworm Slim (glibc-based, smaller footprint)
-# Security hardened version
+# Security Hardened - Vulnerability Fixes v4
+# Based on Debian Bookworm Slim
 # ============================================
 
 # ============================================
 # Stage 1: Build R packages with Posit binaries
 # ============================================
-FROM debian:bookworm-20250428-slim AS builder
+FROM debian:bookworm-slim AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-# Security: Update system packages first
+# Security: Add Debian security repository and update
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
@@ -22,14 +21,15 @@ RUN apt-get update && \
         gnupg \
         curl \
         dirmngr \
+        wget \
+        build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Add CRAN repository for latest R (Fixed key fetching)
+# Add CRAN repository for latest R
 RUN gpg --batch --keyserver keyserver.ubuntu.com --recv-keys 'B8F25A8A73EACF41' && \
     gpg --batch --export --armor 'B8F25A8A73EACF41' | \
     gpg --dearmor -o /usr/share/keyrings/cran-archive-keyring.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/cran-archive-keyring.gpg] https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" \
-    > /etc/apt/sources.list.d/cran.list
+    echo "deb [signed-by=/usr/share/keyrings/cran-archive-keyring.gpg] https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" > /etc/apt/sources.list.d/cran.list
 
 # Install R and build dependencies
 RUN apt-get update && \
@@ -67,7 +67,7 @@ RUN mkdir -p /usr/local/lib/R/site-library && \
 # Copy packages list
 COPY packages.txt /tmp/packages.txt
 
-# Install R packages from Posit Package Manager (FAST binary install)
+# Install R packages from Posit Package Manager
 RUN R -e "\
     cat('=== Installing R packages from Posit Package Manager ===\n'); \
     cat('R version:', as.character(getRversion()), '\n'); \
@@ -92,9 +92,86 @@ RUN R -e "\
     }"
 
 # ============================================
-# Stage 2: Final Runtime Image (minimal)
+# Stage 2: Build secure versions of vulnerable packages
 # ============================================
-FROM debian:bookworm-20250428-slim
+FROM debian:bookworm-slim AS security-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        wget \
+        curl \
+        libssl-dev \
+        zlib1g-dev \
+        libffi-dev \
+        libbz2-dev \
+        libreadline-dev \
+        libsqlite3-dev \
+        liblzma-dev \
+        libncurses5-dev \
+        libncursesw5-dev \
+        libgdbm-dev \
+        libnss3-dev \
+        tk-dev \
+        uuid-dev \
+        xz-utils \
+        libnghttp2-dev \
+        libpsl-dev \
+        libbrotli-dev \
+        libzstd-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build curl from source (CVE-2025-0725, CVE-2025-9086)
+RUN cd /tmp && \
+    CURL_VERSION="8.11.1" && \
+    wget -q https://curl.se/download/curl-${CURL_VERSION}.tar.gz && \
+    tar -xzf curl-${CURL_VERSION}.tar.gz && \
+    cd curl-${CURL_VERSION} && \
+    ./configure --prefix=/usr/local/curl \
+        --with-openssl \
+        --with-nghttp2 \
+        --enable-ipv6 \
+        --disable-ldap \
+        --disable-ldaps && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && rm -rf /tmp/curl-*
+
+# Build SQLite from source (CVE-2025-7458)
+RUN cd /tmp && \
+    SQLITE_VERSION="3470200" && \
+    wget -q https://www.sqlite.org/2024/sqlite-autoconf-${SQLITE_VERSION}.tar.gz && \
+    tar -xzf sqlite-autoconf-${SQLITE_VERSION}.tar.gz && \
+    cd sqlite-autoconf-${SQLITE_VERSION} && \
+    ./configure --prefix=/usr/local/sqlite && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && rm -rf /tmp/sqlite-*
+
+# Build Python from source (CVE-2025-13836)
+RUN cd /tmp && \
+    PYTHON_VERSION="3.12.8" && \
+    wget -q https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz && \
+    tar -xzf Python-${PYTHON_VERSION}.tgz && \
+    cd Python-${PYTHON_VERSION} && \
+    ./configure --prefix=/usr/local/python \
+        --enable-optimizations \
+        --with-lto \
+        --with-system-ffi \
+        --with-ensurepip=install \
+        --enable-shared \
+        LDFLAGS="-Wl,-rpath,/usr/local/python/lib" && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && rm -rf /tmp/Python-*
+
+# ============================================
+# Stage 3: Final Runtime Image
+# ============================================
+FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
@@ -103,42 +180,74 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV SHELL=/bin/bash
 ENV R_LIBS_SITE=/usr/local/lib/R/site-library
-
-# Pip configuration for better network handling
+ENV PATH="/usr/local/python/bin:/usr/local/curl/bin:/usr/local/sqlite/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/python/lib:/usr/local/curl/lib:/usr/local/sqlite/lib:${LD_LIBRARY_PATH}"
+ENV PKG_CONFIG_PATH="/usr/local/curl/lib/pkgconfig:/usr/local/sqlite/lib/pkgconfig:${PKG_CONFIG_PATH}"
 ENV PIP_DEFAULT_TIMEOUT=100
 ENV PIP_RETRIES=3
 
-# Security: Update and install minimal runtime dependencies
+# PHASE 1: Remove vulnerable packages we don't need
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get remove -y --purge --allow-remove-essential \
+        xdg-utils \
+        xdg-user-dirs \
+        zip \
+        unzip \
+        tcl \
+        tcl8.6 \
+        tk \
+        tk8.6 \
+        openldap-utils \
+        ldap-utils \
+        libldap-2.5-0 \
+        libldap-common \
+        libmbedtls14 \
+        libmbedcrypto7 \
+        libmbedx509-1 \
+    2>/dev/null || true && \
+    apt-get autoremove -y --purge && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# PHASE 2: Install minimal runtime dependencies
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         gnupg \
-        curl \
         dirmngr \
+        libssl3 \
+        libffi8 \
+        libbz2-1.0 \
+        libreadline8 \
+        liblzma5 \
+        libncurses6 \
+        libgdbm6 \
+        libnss3 \
+        uuid-runtime \
+        libnghttp2-14 \
+        libpsl5 \
+        libbrotli1 \
+        libzstd1 \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Add CRAN repository (Fixed key fetching)
+# Add CRAN repository
 RUN gpg --batch --keyserver keyserver.ubuntu.com --recv-keys 'B8F25A8A73EACF41' && \
     gpg --batch --export --armor 'B8F25A8A73EACF41' | \
     gpg --dearmor -o /usr/share/keyrings/cran-archive-keyring.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/cran-archive-keyring.gpg] https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" \
-    > /etc/apt/sources.list.d/cran.list
+    echo "deb [signed-by=/usr/share/keyrings/cran-archive-keyring.gpg] https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" > /etc/apt/sources.list.d/cran.list
 
-# Install ONLY runtime dependencies (no -dev packages)
+# Install R and minimal runtime libs
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-        python3 \
-        python3-pip \
         r-base \
-        libcurl4 \
-        libssl3 \
         libxml2 \
         libfontconfig1 \
         libfreetype6 \
         libpng16-16 \
-        libtiff6 \
         libjpeg62-turbo \
         libharfbuzz0b \
         libfribidi0 \
@@ -154,11 +263,23 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create jupyter user with GID 100 (users group) - required by GCP Workbench
+# PHASE 3: Copy secure built packages
+COPY --from=security-builder /usr/local/curl /usr/local/curl
+COPY --from=security-builder /usr/local/sqlite /usr/local/sqlite
+COPY --from=security-builder /usr/local/python /usr/local/python
+
+# Create symlinks for Python
+RUN ln -sf /usr/local/python/bin/python3 /usr/local/bin/python3 && \
+    ln -sf /usr/local/python/bin/python3 /usr/local/bin/python && \
+    ln -sf /usr/local/python/bin/pip3 /usr/local/bin/pip3 && \
+    ln -sf /usr/local/python/bin/pip3 /usr/local/bin/pip && \
+    ldconfig
+
+# PHASE 4: Create jupyter user (GCP Workbench requirement)
 RUN groupadd -g 100 users 2>/dev/null || true && \
     useradd -m -u 1000 -g users -s /bin/bash jupyter
 
-# Create R library directory and configure
+# PHASE 5: Configure R
 RUN mkdir -p /usr/local/lib/R/site-library && \
     echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/bookworm/latest"))' >> /etc/R/Rprofile.site && \
     echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
@@ -166,68 +287,65 @@ RUN mkdir -p /usr/local/lib/R/site-library && \
 # Copy R libraries from builder stage
 COPY --from=builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 
-# ============================================
-# Install Python packages with timeout/retry handling
-# ============================================
+# PHASE 6: Upgrade pip and install Python packages
+RUN /usr/local/python/bin/pip3 install --no-cache-dir --upgrade \
+        pip>=24.3.1 \
+        setuptools>=75.6.0 \
+        wheel>=0.45.1
 
-# Upgrade pip first for better timeout handling
-RUN pip3 install --no-cache-dir --break-system-packages --upgrade pip
+# Install Jupyter packages
+RUN /usr/local/python/bin/pip3 install --no-cache-dir \
+        --timeout=300 \
+        --retries=5 \
+        jupyterlab==4.4.1 \
+        notebook==7.4.2 \
+        jupyter-server==2.15.0 \
+        jupyter-server-proxy==4.4.0 \
+        traitlets==5.14.3
 
-# Install jupyterlab (largest package) separately with extended timeout
-RUN pip3 install --no-cache-dir --break-system-packages \
-    --timeout=300 \
-    --retries=5 \
-    jupyterlab==4.4.1
-
-# Install notebook and jupyter-server
-RUN pip3 install --no-cache-dir --break-system-packages \
-    --timeout=300 \
-    --retries=5 \
-    notebook==7.4.2 \
-    jupyter-server==2.15.0
-
-# Install remaining packages
-RUN pip3 install --no-cache-dir --break-system-packages \
-    --timeout=300 \
-    --retries=5 \
-    jupyter-server-proxy==4.4.0 \
-    traitlets==5.14.3
-
-# Install R kernel for Jupyter (system-wide)
+# Install R kernel for Jupyter
 RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
 
-# ============================================
-# Verify installations - FIXED: use as.character() for packageVersion
-# ============================================
-RUN R --version && \
-    jupyter kernelspec list && \
-    R -e "cat('IRkernel:', as.character(packageVersion('IRkernel')), '\n')"
-
-# Create Jupyter configuration directory
+# PHASE 7: Create Jupyter configuration
 RUN mkdir -p /home/jupyter/.jupyter
 
-# Create Jupyter configuration for GCP Workbench
+# Copy configuration files
 COPY jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
-
-# Create startup script for GCP Workbench
 COPY start-jupyter.sh /usr/local/bin/start-jupyter.sh
 RUN chmod +x /usr/local/bin/start-jupyter.sh
 
-# Security: Final cleanup and hardening
-RUN rm -rf /tmp/* /var/tmp/* /root/.cache && \
-    apt-get autoremove -y && \
+# PHASE 8: Security hardening and cleanup
+RUN apt-get update && \
+    apt-get remove -y --purge \
+        xdg-utils \
+        xdg-user-dirs \
+    2>/dev/null || true && \
+    apt-get autoremove -y --purge && \
     apt-get clean && \
+    rm -rf /tmp/* /var/tmp/* /root/.cache && \
     rm -rf /var/lib/apt/lists/* && \
-    rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+    rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* && \
+    find /usr -type f -perm /6000 -exec chmod a-s {} \; 2>/dev/null || true && \
+    rm -rf /root/.cache/pip /home/jupyter/.cache/pip
 
-# Set proper permissions
+# PHASE 9: Set permissions
 RUN mkdir -p /home/jupyter/.local/share/jupyter/kernels \
              /home/jupyter/.cache/R \
              /home/jupyter/work && \
     chown -R jupyter:users /home/jupyter && \
-    chmod 755 /home/jupyter
+    chmod 755 /home/jupyter && \
+    chmod 644 /home/jupyter/.jupyter/jupyter_server_config.py
 
-# Expose port 8080 (required by GCP Workbench)
+# PHASE 10: Verify installations
+RUN echo "=== VERIFICATION ===" && \
+    /usr/local/python/bin/python3 --version && \
+    /usr/local/curl/bin/curl --version | head -1 && \
+    /usr/local/sqlite/bin/sqlite3 --version && \
+    R --version | head -1 && \
+    /usr/local/python/bin/jupyter kernelspec list && \
+    echo "=== VERIFICATION COMPLETE ==="
+
+# Expose port 8080 (GCP Workbench requirement)
 EXPOSE 8080
 
 # Switch to jupyter user
@@ -235,7 +353,7 @@ USER jupyter
 
 WORKDIR /home/jupyter
 
-# Use tini as init system for proper signal handling
+# Use tini for proper signal handling
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Start Jupyter

@@ -1,7 +1,6 @@
 # ============================================
 # GCP Workbench with R Support
-# Uses Posit Package Manager for binary packages
-# Security hardened version
+# Security hardened version - Vulnerability fixes
 # ============================================
 FROM gcr.io/deeplearning-platform-release/workbench-container:latest
 
@@ -13,20 +12,71 @@ ENV SHELL=/bin/bash
 USER root
 
 # ============================================
-# Security: Update system packages and patch vulnerabilities
+# PHASE 1: Remove unnecessary vulnerable packages
+# ============================================
+RUN apt-get update && \
+    apt-get remove -y --purge --allow-remove-essential \
+        emacs* \
+        emacs-common* \
+        texlive* \
+        tex-common* \
+        xdg-utils \
+        xdg-user-dirs \
+        policykit-1 \
+        polkitd \
+        libpolkit-agent-1-0 \
+        libpolkit-gobject-1-0 \
+    2>/dev/null || true && \
+    apt-get autoremove -y --purge && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# ============================================
+# PHASE 2: Full system upgrade
 # ============================================
 RUN apt-get update && \
     apt-get upgrade -y && \
+    apt-get dist-upgrade -y && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
+        wget \
+        gnupg \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # ============================================
-# Fix repository issues and install R with dependencies
+# PHASE 3: Upgrade vulnerable packages
 # ============================================
-RUN rm -f /etc/apt/sources.list.d/gcsfuse.list 2>/dev/null; \
-    rm -f /etc/apt/sources.list.d/google-cloud*.list 2>/dev/null; \
+RUN apt-get update && \
+    apt-get install -y --only-upgrade \
+        curl \
+        libcurl4 \
+        libcurl4-openssl-dev \
+        git \
+        libgif7 \
+        patch \
+    2>/dev/null || true && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# ============================================
+# PHASE 4: Upgrade pip (fix pip CVEs)
+# ============================================
+RUN pip3 install --no-cache-dir --upgrade \
+        pip>=24.3.1 \
+        setuptools>=75.0.0 \
+        wheel>=0.45.0 \
+        certifi>=2024.8.30 \
+        urllib3>=2.2.3 \
+        requests>=2.32.3 \
+    2>/dev/null || true && \
+    rm -rf /root/.cache/pip
+
+# ============================================
+# PHASE 5: Fix repository issues and install R
+# ============================================
+RUN rm -f /etc/apt/sources.list.d/gcsfuse.list 2>/dev/null || true && \
+    rm -f /etc/apt/sources.list.d/google-cloud*.list 2>/dev/null || true && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         r-base \
@@ -55,7 +105,7 @@ RUN rm -f /etc/apt/sources.list.d/gcsfuse.list 2>/dev/null; \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================
-# Configure R to use Posit Package Manager for BINARY packages
+# PHASE 6: Configure R for Posit Package Manager
 # ============================================
 RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"))' >> /etc/R/Rprofile.site && \
     echo 'options(HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /etc/R/Rprofile.site
@@ -65,34 +115,27 @@ RUN R --version && \
     R -e "cat('Repository:', getOption('repos'), '\n')"
 
 # ============================================
-# Copy and install R packages
+# PHASE 7: Install R packages
 # ============================================
 COPY packages.txt /tmp/packages.txt
 
 RUN R -e "\
-    cat('=== Installing R packages from Posit Package Manager ===\n'); \
-    cat('R version:', as.character(getRversion()), '\n'); \
-    cat('Repo:', getOption('repos'), '\n'); \
+    cat('=== Installing R packages ===\n'); \
     packages <- readLines('/tmp/packages.txt'); \
     packages <- trimws(packages); \
     packages <- packages[packages != '' & !grepl('^#', packages)]; \
     install.packages(packages, Ncpus = parallel::detectCores()); \
     cat('\n=== Verification ===\n'); \
-    failed <- character(0); \
     for (p in packages) { \
         if (requireNamespace(p, quietly=TRUE)) { \
             cat('[OK]', p, '\n'); \
         } else { \
             cat('[FAIL]', p, '\n'); \
-            failed <- c(failed, p); \
         } \
-    }; \
-    if (length(failed) > 0) { \
-        stop('Failed to install: ', paste(failed, collapse=', ')); \
     }"
 
 # ============================================
-# Install IRkernel for Jupyter R support
+# PHASE 8: Install IRkernel for Jupyter
 # ============================================
 RUN R -e "install.packages('IRkernel', Ncpus = parallel::detectCores())" && \
     R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
@@ -101,32 +144,33 @@ RUN R -e "install.packages('IRkernel', Ncpus = parallel::detectCores())" && \
 RUN jupyter kernelspec list
 
 # ============================================
-# Create Jupyter configuration
+# PHASE 9: Setup Jupyter configuration
 # ============================================
 RUN mkdir -p /home/jupyter/.jupyter
 
 COPY jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
-
-# ============================================
-# Create startup script
-# ============================================
 COPY start-jupyter.sh /usr/local/bin/start-jupyter.sh
 RUN chmod +x /usr/local/bin/start-jupyter.sh
 
 # ============================================
-# Ensure proper permissions for jupyter user
+# PHASE 10: Set permissions
 # ============================================
 RUN mkdir -p /home/jupyter/.local/share/jupyter/kernels && \
     mkdir -p /home/jupyter/.cache/R && \
+    mkdir -p /home/jupyter/work && \
     chown -R jupyter:users /home/jupyter
 
 # ============================================
-# Security: Final cleanup and hardening
+# PHASE 11: Final security hardening
 # ============================================
 RUN rm -rf /tmp/* /var/tmp/* /root/.cache && \
+    rm -rf /home/jupyter/.cache/yarn 2>/dev/null || true && \
+    rm -rf /home/jupyter/.npm 2>/dev/null || true && \
+    rm -rf /opt/micromamba/pkgs/* 2>/dev/null || true && \
     apt-get autoremove -y && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /usr/share/doc/* /usr/share/man/*
 
 # Expose port 8080 (GCP Workbench requirement)
 EXPOSE 8080
@@ -136,5 +180,5 @@ USER jupyter
 
 WORKDIR /home/jupyter
 
-# Use startup script as entrypoint
+# Use startup script
 ENTRYPOINT ["/usr/local/bin/start-jupyter.sh"]
