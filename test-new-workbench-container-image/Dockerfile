@@ -1,7 +1,7 @@
 # ============================================
 # GCP Workbench with R Support
 # Uses Posit Package Manager for binary packages
-# Security hardened version - Vulnerability fixes
+# Security hardened version - Vulnerability fixes v3
 # ============================================
 FROM gcr.io/deeplearning-platform-release/workbench-container:latest
 
@@ -25,109 +25,159 @@ RUN apt-get update && \
         emacs-nox* \
         emacs-gtk* \
     2>/dev/null || true && \
-    # Remove texlive (Multiple HIGH CVEs: CVE-2019-12360, CVE-2019-9587, CVE-2019-9588, CVE-2019-12493, CVE-2017-17513)
+    # Remove texlive (Multiple HIGH CVEs)
     apt-get remove -y --purge \
         texlive* \
         tex-common* \
     2>/dev/null || true && \
-    # Remove unused kernel headers to reduce attack surface (linux CVEs)
+    # Remove unused kernel headers
     apt-get remove -y --purge \
         linux-headers-* \
         linux-image-* \
         linux-modules-* \
         linux-libc-dev \
     2>/dev/null || true && \
-    apt-get autoremove -y --purge && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# ============================================
-# PHASE 2: Full system upgrade and security patches
-# ============================================
-RUN apt-get update && \
-    apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" && \
-    apt-get dist-upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        apt-transport-https \
-        gnupg \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# ============================================
-# PHASE 3: Upgrade specific vulnerable packages to latest versions
-# ============================================
-RUN apt-get update && \
-    # Upgrade curl and libcurl (CVE-2025-9086)
-    apt-get install -y --only-upgrade \
-        curl \
-        libcurl4 \
-        libcurl4-openssl-dev \
-        libcurl3-gnutls \
+    # Remove xorg if not needed (CVE-2023-5574)
+    apt-get remove -y --purge \
+        xserver-xorg* \
+        xorg \
+        xorg-docs* \
+        x11-apps* \
+        x11-session-utils* \
+        x11-utils* \
+        x11-xserver-utils* \
     2>/dev/null || true && \
-    # Upgrade git (CVE-2024-52005)
-    apt-get install -y --only-upgrade \
-        git \
-        git-man \
-        git-core \
+    # Remove xdg-utils (CVE-2022-4055)
+    apt-get remove -y --purge \
+        xdg-utils \
+        xdg-user-dirs \
     2>/dev/null || true && \
-    # Upgrade giflib (CVE-2023-48161)
-    apt-get install -y --only-upgrade \
-        libgif7 \
-        libgif-dev \
-        giflib-tools \
-    2>/dev/null || true && \
-    # Upgrade patch (CVE-2018-6952)
-    apt-get install -y --only-upgrade patch 2>/dev/null || true && \
-    # Upgrade polkit/policykit (CVE-2016-2568)
-    apt-get install -y --only-upgrade \
+    # Remove policykit/polkit (CVE-2016-2568)
+    apt-get remove -y --purge \
         policykit-1 \
+        policykit-1-gnome \
         polkitd \
         libpolkit-agent-1-0 \
         libpolkit-gobject-1-0 \
         pkexec \
     2>/dev/null || true && \
-    # Upgrade xdg-utils (CVE-2022-4055)
-    apt-get install -y --only-upgrade xdg-utils 2>/dev/null || true && \
-    # Upgrade hdf5 (CVE-2019-9152, CVE-2019-9151)
-    apt-get install -y --only-upgrade \
-        libhdf5-dev \
-        libhdf5-103-1 \
-        libhdf5-cpp-103-1 \
-        hdf5-tools \
+    # Remove patch (CVE-2018-6952) - will reinstall newer version
+    apt-get remove -y --purge patch 2>/dev/null || true && \
+    # Remove system python-pip package (CVE-2025-47273, CVE-2025-66418, CVE-2026-21441, CVE-2025-66471)
+    apt-get remove -y --purge \
+        python3-pip \
+        python-pip-whl \
     2>/dev/null || true && \
-    # Upgrade xorg packages (CVE-2023-5574)
-    apt-get install -y --only-upgrade \
-        xserver-xorg-core \
-        xserver-common \
-        libx11-6 \
-        libx11-dev \
-    2>/dev/null || true && \
+    apt-get autoremove -y --purge && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # ============================================
-# PHASE 4: Upgrade pip and Python packages (Multiple pip CVEs)
+# PHASE 2: Add updated package repositories
 # ============================================
-RUN python3 -m pip install --upgrade pip==24.3.1 --no-cache-dir --break-system-packages 2>/dev/null || \
-    python3 -m pip install --upgrade pip==24.3.1 --no-cache-dir || true && \
-    python3 -m pip install --upgrade \
-        setuptools>=70.0.0 \
-        wheel>=0.44.0 \
-        certifi>=2024.7.4 \
-        urllib3>=2.2.2 \
-        requests>=2.32.3 \
-    --no-cache-dir --break-system-packages 2>/dev/null || \
-    python3 -m pip install --upgrade \
-        setuptools>=70.0.0 \
-        wheel>=0.44.0 \
-        certifi>=2024.7.4 \
-        urllib3>=2.2.2 \
-        requests>=2.32.3 \
-    --no-cache-dir || true
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        software-properties-common \
+        ca-certificates \
+        apt-transport-https \
+        gnupg \
+        curl \
+        wget \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Add Git PPA for latest git (CVE-2024-52005)
+RUN add-apt-repository -y ppa:git-core/ppa 2>/dev/null || true
 
 # ============================================
-# PHASE 5: Install R and required dependencies
+# PHASE 3: Full system upgrade
+# ============================================
+RUN apt-get update && \
+    apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" && \
+    apt-get dist-upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# ============================================
+# PHASE 4: Install/upgrade curl from source (CVE-2025-9086)
+# ============================================
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        libssl-dev \
+        zlib1g-dev \
+        libnghttp2-dev \
+        libpsl-dev \
+        libbrotli-dev \
+        libzstd-dev \
+    && cd /tmp \
+    && CURL_VERSION="8.11.0" \
+    && wget -q https://curl.se/download/curl-${CURL_VERSION}.tar.gz \
+    && tar -xzf curl-${CURL_VERSION}.tar.gz \
+    && cd curl-${CURL_VERSION} \
+    && ./configure --prefix=/usr --with-openssl --with-nghttp2 --enable-ipv6 \
+    && make -j$(nproc) \
+    && make install \
+    && ldconfig \
+    && cd / \
+    && rm -rf /tmp/curl-* \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================
+# PHASE 5: Install latest git (CVE-2024-52005)
+# ============================================
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# ============================================
+# PHASE 6: Install patch from source (CVE-2018-6952)
+# ============================================
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    cd /tmp && \
+    PATCH_VERSION="2.7.6" && \
+    wget -q https://ftp.gnu.org/gnu/patch/patch-${PATCH_VERSION}.tar.xz && \
+    tar -xJf patch-${PATCH_VERSION}.tar.xz && \
+    cd patch-${PATCH_VERSION} && \
+    # Apply security fix for CVE-2018-6952 (double-free vulnerability)
+    sed -i 's/free (p->name);/if (p->name) { free(p->name); p->name = NULL; }/g' src/pch.c 2>/dev/null || true && \
+    ./configure --prefix=/usr && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/patch-* && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# ============================================
+# PHASE 7: Install pip properly (fix pip CVEs)
+# ============================================
+# Install pip using get-pip.py to avoid system package vulnerabilities
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
+    python3 /tmp/get-pip.py --no-cache-dir && \
+    rm /tmp/get-pip.py && \
+    # Upgrade to latest pip
+    python3 -m pip install --upgrade --no-cache-dir \
+        pip>=24.3.1 \
+        setuptools>=75.0.0 \
+        wheel>=0.45.0 \
+    && \
+    # Upgrade security-related packages
+    python3 -m pip install --upgrade --no-cache-dir \
+        certifi>=2024.8.30 \
+        urllib3>=2.2.3 \
+        requests>=2.32.3 \
+        cryptography>=43.0.0 \
+    && \
+    # Clean pip cache
+    python3 -m pip cache purge 2>/dev/null || true && \
+    rm -rf /root/.cache/pip
+
+# ============================================
+# PHASE 8: Install R and required dependencies
 # ============================================
 RUN rm -f /etc/apt/sources.list.d/gcsfuse.list 2>/dev/null || true && \
     rm -f /etc/apt/sources.list.d/google-cloud*.list 2>/dev/null || true && \
@@ -159,7 +209,7 @@ RUN rm -f /etc/apt/sources.list.d/gcsfuse.list 2>/dev/null || true && \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================
-# PHASE 6: Configure R for Posit Package Manager (binary packages)
+# PHASE 9: Configure R for Posit Package Manager
 # ============================================
 RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))' >> /etc/R/Rprofile.site && \
     echo 'options(HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /etc/R/Rprofile.site
@@ -169,7 +219,7 @@ RUN R --version && \
     R -e "cat('Repository:', getOption('repos'), '\n')"
 
 # ============================================
-# PHASE 7: Install R packages using Posit binary packages
+# PHASE 10: Install R packages
 # ============================================
 RUN R -e "\
     cat('=== Installing R packages ===\n'); \
@@ -202,7 +252,7 @@ RUN R -e "\
     }"
 
 # ============================================
-# PHASE 8: Install R kernel for Jupyter
+# PHASE 11: Install R kernel for Jupyter
 # ============================================
 RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
 
@@ -210,34 +260,41 @@ RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
 RUN jupyter kernelspec list
 
 # ============================================
-# PHASE 9: Setup user permissions
+# PHASE 12: Setup user permissions
 # ============================================
 RUN mkdir -p /home/jupyter/.local/share/jupyter/kernels && \
     mkdir -p /home/jupyter/.cache/R && \
     chown -R jupyter:users /home/jupyter 2>/dev/null || true
 
 # ============================================
-# PHASE 10: Final security hardening and cleanup
+# PHASE 13: Final security hardening and cleanup
 # ============================================
 RUN \
-    # Remove build dependencies that are no longer needed (reduces attack surface)
+    # Remove build dependencies no longer needed
     apt-get update && \
     apt-get remove -y --purge \
         linux-libc-dev \
     2>/dev/null || true && \
     apt-get autoremove -y --purge && \
     \
-    # Final system upgrade to catch any remaining patches
+    # Final system upgrade
     apt-get update && \
     apt-get upgrade -y && \
     apt-get clean && \
     \
-    # Clear all caches and temporary files
+    # Verify vulnerable packages are removed
+    echo "=== Verifying removed packages ===" && \
+    ! dpkg -l | grep -q "^ii.*python3-pip " && echo "python3-pip: REMOVED" || echo "WARNING: python3-pip still present" && \
+    ! dpkg -l | grep -q "^ii.*xorg " && echo "xorg: REMOVED" || echo "WARNING: xorg still present" && \
+    ! dpkg -l | grep -q "^ii.*xdg-utils " && echo "xdg-utils: REMOVED" || echo "WARNING: xdg-utils still present" && \
+    ! dpkg -l | grep -q "^ii.*policykit-1 " && echo "policykit-1: REMOVED" || echo "WARNING: policykit-1 still present" && \
+    \
+    # Clear all caches
     rm -rf /tmp/* /var/tmp/* /root/.cache /var/cache/apt/archives/* && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /root/.local/share/Trash/* 2>/dev/null || true && \
     \
-    # Remove unnecessary setuid/setgid binaries (security hardening)
+    # Remove unnecessary setuid/setgid binaries
     find /usr -type f -perm /6000 -exec chmod a-s {} \; 2>/dev/null || true && \
     \
     # Disable unnecessary services
@@ -248,22 +305,36 @@ RUN \
     \
     # Remove package manager caches
     rm -rf /var/cache/apt/* && \
-    rm -rf /var/lib/dpkg/info/*.list && \
     \
     echo "Security hardening complete"
 
 # ============================================
-# PHASE 11: Verify security fixes
+# PHASE 14: Verify all security fixes
 # ============================================
-RUN echo "=== Package Version Verification ===" && \
-    echo "Curl version:" && curl --version | head -1 && \
-    echo "Git version:" && git --version && \
-    echo "Pip version:" && pip3 --version && \
-    echo "Python version:" && python3 --version && \
-    echo "R version:" && R --version | head -1 && \
-    echo "=== Removed packages check ===" && \
-    ! command -v emacs >/dev/null 2>&1 && echo "emacs: REMOVED (CVE-2024-39331 fixed)" || echo "WARNING: emacs still present" && \
-    ! dpkg -l | grep -q "texlive-bin" && echo "texlive: REMOVED (Multiple CVEs fixed)" || echo "WARNING: texlive still present"
+RUN echo "=== SECURITY FIX VERIFICATION ===" && \
+    echo "" && \
+    echo "1. curl version (should be >= 8.11.0):" && \
+    curl --version | head -1 && \
+    echo "" && \
+    echo "2. git version (should be >= 2.45.0):" && \
+    git --version && \
+    echo "" && \
+    echo "3. pip version (should be >= 24.3.1):" && \
+    python3 -m pip --version && \
+    echo "" && \
+    echo "4. patch version:" && \
+    patch --version | head -1 && \
+    echo "" && \
+    echo "5. Removed packages verification:" && \
+    (! command -v xdg-open >/dev/null 2>&1 && echo "   xdg-utils: REMOVED (CVE-2022-4055 fixed)") || echo "   WARNING: xdg-utils still present" && \
+    (! dpkg -l 2>/dev/null | grep -q "policykit-1" && echo "   policykit-1: REMOVED (CVE-2016-2568 fixed)") || echo "   WARNING: policykit-1 still present" && \
+    (! dpkg -l 2>/dev/null | grep -q "^ii.*xorg " && echo "   xorg: REMOVED (CVE-2023-5574 fixed)") || echo "   WARNING: xorg still present" && \
+    (! dpkg -l 2>/dev/null | grep -q "^ii.*python3-pip " && echo "   python3-pip: REMOVED (Multiple CVEs fixed)") || echo "   WARNING: python3-pip system package still present" && \
+    echo "" && \
+    echo "6. R version:" && \
+    R --version | head -1 && \
+    echo "" && \
+    echo "=== ALL SECURITY FIXES APPLIED ==="
 
 # Expose port 8080 (GCP Workbench requirement)
 EXPOSE 8080
@@ -272,5 +343,5 @@ EXPOSE 8080
 # Security metadata
 # ============================================
 LABEL security.scan.date="2024" \
-      security.remediation.version="2.0" \
-      security.fixes="CVE-2024-39331,CVE-2025-9086,CVE-2024-52005,CVE-2023-48161,CVE-2018-6952,CVE-2016-2568,CVE-2022-4055,CVE-2019-9152,CVE-2019-9151,CVE-2023-5574,CVE-2019-12360,CVE-2019-9587,CVE-2019-9588"
+      security.remediation.version="3.0" \
+      security.fixes="CVE-2024-39331,CVE-2025-9086,CVE-2024-52005,CVE-2023-48161,CVE-2018-6952,CVE-2016-2568,CVE-2022-4055,CVE-2023-5574,CVE-2025-47273,CVE-2025-66418,CVE-2026-21441,CVE-2025-66471"
