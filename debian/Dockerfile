@@ -21,10 +21,12 @@ RUN apt-get update && \
         ca-certificates \
         gnupg \
         curl \
+        dirmngr \
     && rm -rf /var/lib/apt/lists/*
 
-# Add CRAN repository for latest R
-RUN curl -fsSL https://cloud.r-project.org/bin/linux/debian/marutter_pubkey.asc | \
+# Add CRAN repository for latest R (Fixed key fetching)
+RUN gpg --batch --keyserver keyserver.ubuntu.com --recv-keys 'B8F25A8A73EACF41' && \
+    gpg --batch --export --armor 'B8F25A8A73EACF41' | \
     gpg --dearmor -o /usr/share/keyrings/cran-archive-keyring.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/cran-archive-keyring.gpg] https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" \
     > /etc/apt/sources.list.d/cran.list
@@ -102,6 +104,10 @@ ENV PYTHONUNBUFFERED=1
 ENV SHELL=/bin/bash
 ENV R_LIBS_SITE=/usr/local/lib/R/site-library
 
+# Pip configuration for better network handling
+ENV PIP_DEFAULT_TIMEOUT=100
+ENV PIP_RETRIES=3
+
 # Security: Update and install minimal runtime dependencies
 RUN apt-get update && \
     apt-get upgrade -y && \
@@ -109,10 +115,12 @@ RUN apt-get update && \
         ca-certificates \
         gnupg \
         curl \
+        dirmngr \
     && rm -rf /var/lib/apt/lists/*
 
-# Add CRAN repository
-RUN curl -fsSL https://cloud.r-project.org/bin/linux/debian/marutter_pubkey.asc | \
+# Add CRAN repository (Fixed key fetching)
+RUN gpg --batch --keyserver keyserver.ubuntu.com --recv-keys 'B8F25A8A73EACF41' && \
+    gpg --batch --export --armor 'B8F25A8A73EACF41' | \
     gpg --dearmor -o /usr/share/keyrings/cran-archive-keyring.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/cran-archive-keyring.gpg] https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" \
     > /etc/apt/sources.list.d/cran.list
@@ -158,21 +166,42 @@ RUN mkdir -p /usr/local/lib/R/site-library && \
 # Copy R libraries from builder stage
 COPY --from=builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 
-# Install Python packages (pinned versions for security)
+# ============================================
+# Install Python packages with timeout/retry handling
+# ============================================
+
+# Upgrade pip first for better timeout handling
+RUN pip3 install --no-cache-dir --break-system-packages --upgrade pip
+
+# Install jupyterlab (largest package) separately with extended timeout
 RUN pip3 install --no-cache-dir --break-system-packages \
-    jupyterlab==4.4.1 \
+    --timeout=300 \
+    --retries=5 \
+    jupyterlab==4.4.1
+
+# Install notebook and jupyter-server
+RUN pip3 install --no-cache-dir --break-system-packages \
+    --timeout=300 \
+    --retries=5 \
     notebook==7.4.2 \
-    jupyter-server==2.15.0 \
+    jupyter-server==2.15.0
+
+# Install remaining packages
+RUN pip3 install --no-cache-dir --break-system-packages \
+    --timeout=300 \
+    --retries=5 \
     jupyter-server-proxy==4.4.0 \
     traitlets==5.14.3
 
 # Install R kernel for Jupyter (system-wide)
 RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
 
-# Verify installations
+# ============================================
+# Verify installations - FIXED: use as.character() for packageVersion
+# ============================================
 RUN R --version && \
     jupyter kernelspec list && \
-    R -e "cat('IRkernel:', packageVersion('IRkernel'), '\n')"
+    R -e "cat('IRkernel:', as.character(packageVersion('IRkernel')), '\n')"
 
 # Create Jupyter configuration directory
 RUN mkdir -p /home/jupyter/.jupyter
