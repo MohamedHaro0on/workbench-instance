@@ -1,94 +1,113 @@
 # ============================================
-# GCP Workbench - Maximum Security Version
-# Based on Chainguard Wolfi (near-zero CVEs)
+# GCP Workbench - Alpine Linux (Hardened)
+# Security: Minimal attack surface, No glibc
 # ============================================
 
 # ============================================
-# Stage 1: Python Builder
+# Stage 1: Build Stage
 # ============================================
-FROM cgr.dev/chainguard/wolfi-base:latest AS python-builder
+FROM alpine:3.20 AS builder
 
-USER root
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
-RUN apk update && apk add --no-cache \
-    python-3.12 \
-    python-3.12-dev \
-    py3.12-pip \
-    py3.12-setuptools \
-    py3.12-wheel \
-    build-base
-
-RUN python3.12 -m venv /opt/jupyter-venv
-
-RUN /opt/jupyter-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    /opt/jupyter-venv/bin/pip install --no-cache-dir \
-        jupyterlab==4.4.1 \
-        notebook==7.4.2 \
-        jupyter-server==2.15.0 \
-        jupyter-server-proxy==4.4.0 \
-        traitlets==5.14.3 \
-        ipykernel \
-        ipywidgets
-
-# ============================================
-# Stage 2: R Builder
-# ============================================
-FROM cgr.dev/chainguard/wolfi-base:latest AS r-builder
-
-USER root
-
-# Install R and build dependencies
-RUN apk update && apk add --no-cache \
+# 1. Install Build Dependencies
+# We use a single RUN command with backslashes (\) to prevent syntax errors
+RUN apk update && apk upgrade && apk add --no-cache \
+    build-base \
+    gfortran \
+    linux-headers \
+    pkgconf \
+    git \
+    bash \
+    wget \
+    curl \
     R \
     R-dev \
-    build-base \
-    gcc \
-    g++ \
-    gfortran \
-    make \
-    curl \
-    wget \
-    bash \
-    openssl-dev \
+    R-doc \
+    python3 \
+    python3-dev \
+    py3-pip \
+    py3-wheel \
+    py3-setuptools \
     curl-dev \
+    openssl-dev \
     libxml2-dev \
     fontconfig-dev \
     freetype-dev \
     libpng-dev \
-    libjpeg-turbo-dev \
+    jpeg-dev \
     tiff-dev \
     harfbuzz-dev \
     fribidi-dev \
+    zeromq-dev \
     cairo-dev \
     pango-dev \
-    linux-headers \
-    pkgconf \
-    git \
+    libgit2-dev \
+    libssh2-dev \
     icu-dev \
     zlib-dev \
     bzip2-dev \
     xz-dev \
     pcre2-dev \
-    readline
+    readline-dev \
+    libsodium-dev \
+    libx11-dev \
+    libxt-dev \
+    openblas-dev \
+    lapack-dev
 
-# Setup R library directory
+# 2. Configure R directories
 RUN mkdir -p /usr/local/lib/R/site-library && \
-    chmod 777 /usr/local/lib/R/site-library && \
-    mkdir -p /etc/R
+    chmod 755 /usr/local/lib/R/site-library
 
-# Copy the R installation script
-COPY install_packages.R /tmp/install_packages.R
+# 3. Install R Packages
 COPY packages.txt /tmp/packages.txt
 
-# Run R package installation script (won't fail build on package errors)
-RUN Rscript /tmp/install_packages.R || echo "Some R packages may have failed, continuing..."
+# CRITICAL FIX: We explicitly set 'repos' inside the command to prevent "No mirror" errors
+RUN R -e " \
+    install_repo <- 'https://cloud.r-project.org'; \
+    options(repos = c(CRAN = install_repo)); \
+    packages <- readLines('/tmp/packages.txt'); \
+    packages <- trimws(packages); \
+    packages <- packages[packages != '' & !grepl('^#', packages)]; \
+    cat('Installing packages:', paste(packages, collapse=', '), '\n'); \
+    for (pkg in packages) { \
+        cat('\n=== Installing:', pkg, '===\n'); \
+        tryCatch({ \
+            install.packages(pkg, \
+                lib='/usr/local/lib/R/site-library', \
+                repos=install_repo, \
+                dependencies=TRUE, \
+                Ncpus=parallel::detectCores()); \
+        }, error = function(e) { \
+            cat('WARNING: Failed to install', pkg, ':', conditionMessage(e), '\n'); \
+        }); \
+    }; \
+    cat('\n=== Installing IRkernel ===\n'); \
+    install.packages('IRkernel', \
+        lib='/usr/local/lib/R/site-library', \
+        repos=install_repo, \
+        dependencies=TRUE);"
+
+# 4. Create Python venv and install Jupyter
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir \
+    jupyterlab==4.4.1 \
+    notebook==7.4.2 \
+    jupyter-server==2.15.0 \
+    jupyter-server-proxy==4.4.0 \
+    traitlets==5.14.3 \
+    ipykernel \
+    ipywidgets
 
 # ============================================
-# Stage 3: Final Runtime Image
+# Stage 2: Final Runtime
 # ============================================
-FROM cgr.dev/chainguard/wolfi-base:latest
-
-USER root
+FROM alpine:3.20
 
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
@@ -96,82 +115,88 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV SHELL=/bin/bash
 ENV R_LIBS_SITE=/usr/local/lib/R/site-library
-ENV VIRTUAL_ENV=/opt/jupyter-venv
-ENV PATH="/opt/jupyter-venv/bin:${PATH}"
+ENV PATH="/opt/venv/bin:$PATH"
 ENV HOME=/home/jupyter
 
-# Install minimal runtime packages
-RUN apk update && apk add --no-cache \
-    R \
-    python-3.12 \
+# 1. Install Runtime Dependencies
+RUN apk update && apk upgrade && apk add --no-cache \
     bash \
     tini \
+    ca-certificates \
+    R \
+    python3 \
     curl \
+    libcurl \
     libxml2 \
     fontconfig \
     freetype \
     libpng \
-    libjpeg-turbo \
+    jpeg \
     tiff \
     harfbuzz \
     fribidi \
+    zeromq \
     cairo \
     pango \
     glib \
     libgit2 \
     libssh2 \
-    icu \
+    icu-libs \
     zlib \
     bzip2 \
-    xz \
+    xz-libs \
     pcre2 \
     readline \
+    libsodium \
+    openblas \
+    lapack \
+    libgomp \
+    libgfortran \
     ncurses \
     ncurses-terminfo-base \
-    libgfortran \
-    libgomp \
     && rm -rf /var/cache/apk/*
 
-# Create jupyter user
-RUN (getent group users >/dev/null 2>&1 || addgroup -g 100 users) && \
-    adduser -D -u 1000 -G users -h /home/jupyter -s /bin/bash jupyter
+# 2. Create User
+RUN adduser -D -u 1000 -G users -s /bin/bash -h /home/jupyter jupyter
 
-# Copy from builders
-COPY --from=python-builder /opt/jupyter-venv /opt/jupyter-venv
-COPY --from=r-builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
+# 3. Copy artifacts from builder
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 
-# Configure R
-RUN mkdir -p /usr/local/lib/R/site-library /etc/R && \
+# 4. Configure R Runtime
+RUN mkdir -p /usr/local/lib/R/site-library && \
     echo 'options(repos = c(CRAN = "https://cloud.r-project.org"))' >> /etc/R/Rprofile.site && \
     echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
 
-# Install R kernel for Jupyter (if IRkernel available)
-RUN Rscript -e 'if(requireNamespace("IRkernel",quietly=TRUE)){IRkernel::installspec(user=FALSE,name="ir",displayname="R")}' || true
+# 5. Install R Kernel Spec
+# We install the spec system-wide so Jupyter finds it
+RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R (Alpine)')"
 
-# Setup directories
+# 6. Setup Directories & Permissions
 RUN mkdir -p /home/jupyter/.jupyter \
-             /home/jupyter/.local/share/jupyter/kernels \
-             /home/jupyter/.local/share/jupyter/runtime \
-             /home/jupyter/work && \
+    /home/jupyter/.local/share/jupyter/kernels \
+    /home/jupyter/.local/share/jupyter/runtime \
+    /home/jupyter/work && \
     chown -R jupyter:users /home/jupyter && \
     chmod 755 /home/jupyter
 
-# Copy configuration files
+# 7. Copy Config Files
 COPY --chown=jupyter:users jupyter_server_config.py /home/jupyter/.jupyter/
 COPY --chown=root:root start-jupyter.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/start-jupyter.sh
+RUN chmod +x /usr/local/bin/start-jupyter.sh && \
+    chmod 644 /home/jupyter/.jupyter/jupyter_server_config.py
 
-# Security hardening
+# 8. Security Cleanup
 RUN find /usr -type f -perm /6000 -exec chmod a-s {} \; 2>/dev/null || true && \
-    rm -rf /tmp/* /var/tmp/* /root/.cache 2>/dev/null || true
+    rm -rf /tmp/* /var/tmp/* /root/.cache
 
-# Verification
-RUN echo "=== Verification ===" && \
+# 9. Verify
+RUN echo "=== Final Verification ===" && \
     python3 --version && \
     R --version | head -1 && \
-    /opt/jupyter-venv/bin/jupyter --version && \
-    /opt/jupyter-venv/bin/jupyter kernelspec list && \
-    echo "=== Complete ==="
+    jupyter --version && \
+    jupyter kernelspec list && \
+    echo "=== Verification Complete ==="
 
 EXPOSE 8080
 
