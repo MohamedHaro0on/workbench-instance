@@ -1,0 +1,11 @@
+# R packages for GCP Workbench
+dplyr
+tidyverse
+tibble
+plyr
+tsibble
+timetk
+anomalize
+foreach
+doParallel
+pbapply
