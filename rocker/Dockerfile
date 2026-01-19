@@ -1,7 +1,6 @@
 # ============================================
-# GCP Workbench with R Support
-# Based on rocker/r-ver (minimal R image)
-# Much smaller and more secure than workbench-container
+# GCP Workbench with R Support (Secured + Fixed)
+# Based on rocker/r-ver
 # ============================================
 FROM rocker/r-ver:4.4.2
 
@@ -13,11 +12,16 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # ============================================
-# 1. Install Python and system dependencies
+# 1. Install System Dependencies & Security Upgrades
 # ============================================
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Changes: 
+# - Added 'upgrade -y' to patch system vulnerabilities (curl, git, etc.)
+# - Removed 'python3-pip' (we install it securely in step 2)
+# - Removed 'python3-distutils' (fixed build error)
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
     python3 \
-    python3-pip \
+    python3-dev \
     python3-venv \
     libcurl4-openssl-dev \
     libssl-dev \
@@ -45,9 +49,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================
-# 2. Upgrade pip and install Jupyter
+# 2. Install Pip via Bootstrap (Avoids apt python-pip CVEs)
 # ============================================
-RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
+# This installs the latest official pip, bypassing the vulnerable apt package
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3 && \
     pip3 install --no-cache-dir \
         jupyterlab==4.4.1 \
         notebook==7.4.2 \
@@ -57,7 +62,7 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
     && rm -rf /root/.cache/pip
 
 # ============================================
-# 3. Configure R for Posit Package Manager (binary packages)
+# 3. Configure R for Posit Package Manager
 # ============================================
 RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"))' >> /usr/local/lib/R/etc/Rprofile.site && \
     echo 'options(HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /usr/local/lib/R/etc/Rprofile.site
@@ -94,15 +99,12 @@ RUN groupadd -g 100 users 2>/dev/null || true && \
     mkdir -p /home/jupyter/work
 
 # ============================================
-# 6. Install R kernel for Jupyter (system-wide)
+# 6. Install R kernel for Jupyter
 # ============================================
 RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
 
-# Verify kernels
-RUN jupyter kernelspec list
-
 # ============================================
-# 7. Create Jupyter configuration for GCP Workbench
+# 7. Create Jupyter configuration
 # ============================================
 COPY jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
 

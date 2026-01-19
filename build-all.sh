@@ -29,16 +29,20 @@ declare -A BUILD_MAP
 BUILD_MAP["debian"]="debian"
 BUILD_MAP["test-new-workbench-container-image"]="latest"
 BUILD_MAP["workbench-container-image"]="workbench-container"
+BUILD_MAP["rocker"]="rocker-base"
+
 
 # Full image names
 DEBIAN_IMAGE="${DOCKER_USERNAME}/${IMAGE_BASE}:debian"
 LATEST_IMAGE="${DOCKER_USERNAME}/${IMAGE_BASE}:latest"
 WORKBENCH_IMAGE="${DOCKER_USERNAME}/${IMAGE_BASE}:workbench-container"
+ROCKER_IMAGE="${DOCKER_USERNAME}/${IMAGE_BASE}:rocker-base"
 
 # Test ports
 DEBIAN_PORT=8080
 LATEST_PORT=8081
 WORKBENCH_PORT=8082
+ROCKER_PORT=8083
 
 # Log directory
 LOG_DIR="./build-logs"
