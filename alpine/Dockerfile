@@ -11,9 +11,8 @@ FROM alpine:3.20 AS builder
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-# Install all build dependencies including those needed for tidyverse
+# Install all build dependencies
 RUN apk update && apk upgrade && apk add --no-cache \
-    # Build essentials
     build-base \
     gfortran \
     linux-headers \
@@ -22,17 +21,14 @@ RUN apk update && apk upgrade && apk add --no-cache \
     bash \
     wget \
     curl \
-    # R and development
     R \
     R-dev \
     R-doc \
-    # Python
     python3 \
     python3-dev \
     py3-pip \
     py3-wheel \
     py3-setuptools \
-    # Libraries for R packages (tidyverse dependencies)
     curl-dev \
     openssl-dev \
     libxml2-dev \
@@ -48,7 +44,6 @@ RUN apk update && apk upgrade && apk add --no-cache \
     pango-dev \
     libgit2-dev \
     libssh2-dev \
-    # Additional dependencies for tidyverse/data packages
     icu-dev \
     zlib-dev \
     bzip2-dev \
@@ -56,32 +51,27 @@ RUN apk update && apk upgrade && apk add --no-cache \
     pcre2-dev \
     readline-dev \
     libsodium-dev \
-    # For some R packages that need X11
     libx11-dev \
     libxt-dev \
-    # For parallel processing packages
     openblas-dev \
     lapack-dev
 
-# Configure R to use multiple cores and set CRAN mirror
+# Configure R
 RUN mkdir -p /usr/local/lib/R/site-library && \
     chmod 755 /usr/local/lib/R/site-library && \
     echo 'options(repos = c(CRAN = "https://cloud.r-project.org"))' >> /etc/R/Rprofile.site && \
     echo 'options(Ncpus = parallel::detectCores())' >> /etc/R/Rprofile.site && \
     echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
 
-# Copy packages list
+# Copy and install R packages
 COPY packages.txt /tmp/packages.txt
 
-# Install R packages with better error handling
 RUN R -e "\
     options(warn = 1); \
     packages <- readLines('/tmp/packages.txt'); \
     packages <- trimws(packages); \
     packages <- packages[packages != '' & !grepl('^#', packages)]; \
     cat('Installing packages:', paste(packages, collapse=', '), '\n'); \
-    \
-    # Install packages one by one for better error tracking \
     for (pkg in packages) { \
         cat('\n=== Installing:', pkg, '===\n'); \
         tryCatch({ \
@@ -91,12 +81,8 @@ RUN R -e "\
             cat('WARNING: Failed to install', pkg, ':', conditionMessage(e), '\n'); \
         }); \
     }; \
-    \
-    # Install IRkernel \
     cat('\n=== Installing IRkernel ===\n'); \
     install.packages('IRkernel', lib='/usr/local/lib/R/site-library'); \
-    \
-    # Verify installations \
     cat('\n=== Verification ===\n'); \
     for (pkg in c(packages, 'IRkernel')) { \
         if (requireNamespace(pkg, quietly=TRUE)) { \
@@ -106,11 +92,10 @@ RUN R -e "\
         } \
     }"
 
-# Create Python virtual environment for cleaner package management
+# Create Python venv and install packages
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Upgrade pip and install Python packages
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir \
         jupyterlab==4.4.1 \
@@ -135,17 +120,13 @@ ENV R_LIBS_SITE=/usr/local/lib/R/site-library
 ENV PATH="/opt/venv/bin:$PATH"
 ENV HOME=/home/jupyter
 
-# Install only runtime dependencies (no -dev packages)
+# Install runtime dependencies
 RUN apk update && apk upgrade && apk add --no-cache \
-    # Core
     bash \
     tini \
     ca-certificates \
-    # R runtime
     R \
-    # Python runtime
     python3 \
-    # Runtime libraries (non-dev versions)
     curl \
     libcurl \
     libxml2 \
@@ -173,19 +154,18 @@ RUN apk update && apk upgrade && apk add --no-cache \
     lapack \
     libgomp \
     libgfortran \
-    # For terminal support
     ncurses \
     ncurses-terminfo-base \
     && rm -rf /var/cache/apk/*
 
-# Create jupyter user (GCP Workbench requirement)
-RUN addgroup -g 100 users && \
-    adduser -D -u 1000 -G users -s /bin/bash jupyter
+# ===========================================
+# FIX: Create jupyter user WITHOUT creating group
+# The 'users' group (GID 100) already exists in Alpine
+# ===========================================
+RUN adduser -D -u 1000 -G users -s /bin/bash -h /home/jupyter jupyter
 
-# Copy Python virtual environment from builder
+# Copy from builder
 COPY --from=builder /opt/venv /opt/venv
-
-# Copy R libraries from builder
 COPY --from=builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 
 # Configure R
@@ -193,7 +173,7 @@ RUN mkdir -p /usr/local/lib/R/site-library && \
     echo 'options(repos = c(CRAN = "https://cloud.r-project.org"))' >> /etc/R/Rprofile.site && \
     echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
 
-# Install R kernel for Jupyter (as root, system-wide)
+# Install R kernel
 RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R 4.x')"
 
 # Setup directories
@@ -204,7 +184,7 @@ RUN mkdir -p /home/jupyter/.jupyter \
     chown -R jupyter:users /home/jupyter && \
     chmod 755 /home/jupyter
 
-# Copy configuration files
+# Copy config files
 COPY --chown=jupyter:users jupyter_server_config.py /home/jupyter/.jupyter/
 COPY --chown=root:root start-jupyter.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/start-jupyter.sh && \
@@ -214,7 +194,7 @@ RUN chmod +x /usr/local/bin/start-jupyter.sh && \
 RUN find /usr -type f -perm /6000 -exec chmod a-s {} \; 2>/dev/null || true && \
     rm -rf /tmp/* /var/tmp/* /root/.cache
 
-# Verify installations
+# Verify
 RUN echo "=== Final Verification ===" && \
     python3 --version && \
     R --version | head -1 && \

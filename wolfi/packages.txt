@@ -1,28 +1,25 @@
-# ============================================
-# R Packages for GCP Workbench
-# Compatible with Wolfi/Alpine (musl libc)
-# ============================================
+# R packages for GCP Workbench (Wolfi-compatible)
+# Simplified list - tidyverse often fails on Wolfi
 
-# Core Tidyverse (installs dplyr, ggplot2, tidyr, readr, purrr, tibble, stringr, forcats)
-tidyverse
+# Core data manipulation
+dplyr
+tibble
+tidyr
+readr
+purrr
+stringr
+forcats
 
-# Additional data manipulation
-plyr
+# Visualization
+ggplot2
 
-# Time series analysis
-tsibble
-timetk
-anomalize
+# Data handling
+data.table
+jsonlite
 
 # Parallel processing
 foreach
 doParallel
-pbapply
 
-# Date/time handling (included in tidyverse but explicit)
-lubridate
-
-# Additional commonly used packages
-data.table
-jsonlite
-httr
+# Note: Full tidyverse metapackage may fail on Wolfi
+# These individual packages have better compatibility
