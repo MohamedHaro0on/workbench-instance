@@ -14,10 +14,6 @@ ENV PYTHONUNBUFFERED=1
 # ============================================
 # 1. Install System Dependencies & Security Upgrades
 # ============================================
-# Changes: 
-# - Added 'upgrade -y' to patch system vulnerabilities (curl, git, etc.)
-# - Removed 'python3-pip' (we install it securely in step 2)
-# - Removed 'python3-distutils' (fixed build error)
 RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
     python3 \
@@ -49,11 +45,14 @@ RUN apt-get update && apt-get upgrade -y && \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================
-# 2. Install Pip via Bootstrap (Avoids apt python-pip CVEs)
+# 2. Install Pip via Bootstrap (Fixed for PEP 668)
 # ============================================
-# This installs the latest official pip, bypassing the vulnerable apt package
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3 && \
-    pip3 install --no-cache-dir \
+# We use --break-system-packages because this is a container, 
+# so we want global python packages without using a virtualenv.
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py && \
+    python3 get-pip.py --break-system-packages && \
+    rm get-pip.py && \
+    pip3 install --no-cache-dir --break-system-packages \
         jupyterlab==4.4.1 \
         notebook==7.4.2 \
         jupyter-server==2.15.0 \

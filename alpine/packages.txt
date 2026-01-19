@@ -1,0 +1,25 @@
+# R packages for GCP Workbench
+# Core tidyverse (installed as bundle)
+tidyverse
+
+# Data manipulation (some overlap with tidyverse but explicit)
+dplyr
+tibble
+plyr
+
+# Time series
+tsibble
+timetk
+anomalize
+
+# Parallel processing
+foreach
+doParallel
+pbapply
+
+# Additional commonly needed packages
+lubridate
+stringr
+purrr
+readr
+ggplot2
