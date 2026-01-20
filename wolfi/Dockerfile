@@ -63,18 +63,19 @@ RUN mkdir -p /usr/local/lib/R/site-library && \
 
 # 3. Create R Packages List (Inlined for stability)
 RUN echo "dplyr" > /tmp/packages.txt && \
-    echo "tidyverse" >> /tmp/packages.txt && \
     echo "tibble" >> /tmp/packages.txt && \
-    echo "plyr" >> /tmp/packages.txt && \
-    echo "tsibble" >> /tmp/packages.txt && \
-    echo "timetk" >> /tmp/packages.txt && \
-    echo "anomalize" >> /tmp/packages.txt && \
+    echo "tidyr" >> /tmp/packages.txt && \
+    echo "readr" >> /tmp/packages.txt && \
+    echo "purrr" >> /tmp/packages.txt && \
+    echo "stringr" >> /tmp/packages.txt && \
+    echo "forcats" >> /tmp/packages.txt && \
+    echo "ggplot2" >> /tmp/packages.txt && \
+    echo "data.table" >> /tmp/packages.txt && \
+    echo "jsonlite" >> /tmp/packages.txt && \
     echo "foreach" >> /tmp/packages.txt && \
-    echo "doParallel" >> /tmp/packages.txt && \
-    echo "pbapply" >> /tmp/packages.txt
+    echo "doParallel" >> /tmp/packages.txt
 
 # 4. Install R Packages
-# We explicitly set repos to avoid mirror errors
 RUN R -e " \
     install_repo <- 'https://cloud.r-project.org'; \
     options(repos = c(CRAN = install_repo)); \
@@ -166,7 +167,7 @@ RUN apk update && apk upgrade && apk add --no-cache \
     ncurses-terminfo-base \
     && rm -rf /var/cache/apk/*
 
-# 2. Create User
+# 2. Create User (still useful for file ownership)
 RUN adduser -D -u 1000 -G users -s /bin/bash -h /home/jupyter jupyter
 
 # 3. Copy artifacts from builder
@@ -178,20 +179,21 @@ RUN mkdir -p /usr/local/lib/R/site-library && \
     echo 'options(repos = c(CRAN = "https://cloud.r-project.org"))' >> /etc/R/Rprofile.site && \
     echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
 
-# 5. Install R Kernel Spec
+# 5. Install R Kernel Spec (system-wide for root access)
 RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R (Alpine)')"
 
 # 6. Setup Directories & Permissions
 RUN mkdir -p /home/jupyter/.jupyter \
     /home/jupyter/.local/share/jupyter/kernels \
     /home/jupyter/.local/share/jupyter/runtime \
-    /home/jupyter/work && \
+    /home/jupyter/work \
+    /root/.jupyter \
+    /root/.local/share/jupyter/kernels \
+    /root/.local/share/jupyter/runtime && \
     chown -R jupyter:users /home/jupyter && \
     chmod 755 /home/jupyter
 
-# 7. Generate Configuration Files (Inlined)
-
-# Jupyter Config
+# 7. Generate Jupyter Configuration (FIXED: allow_root = True)
 RUN echo "c = get_config()" > /home/jupyter/.jupyter/jupyter_server_config.py && \
     echo "c.ServerApp.ip = '0.0.0.0'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
     echo "c.ServerApp.port = 8080" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
@@ -200,22 +202,70 @@ RUN echo "c = get_config()" > /home/jupyter/.jupyter/jupyter_server_config.py &&
     echo "c.ServerApp.password = ''" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
     echo "c.ServerApp.allow_root = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
     echo "c.ServerApp.allow_origin = '*'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.allow_remote_access = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
     echo "c.ServerApp.disable_check_xsrf = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
     echo "c.ServerApp.root_dir = '/home/jupyter'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    chmod 644 /home/jupyter/.jupyter/jupyter_server_config.py
+    echo "c.ServerApp.notebook_dir = '/home/jupyter'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.terminals_enabled = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.MappingKernelManager.cull_idle_timeout = 0" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.MappingKernelManager.cull_interval = 0" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    chmod 644 /home/jupyter/.jupyter/jupyter_server_config.py && \
+    cp /home/jupyter/.jupyter/jupyter_server_config.py /root/.jupyter/jupyter_server_config.py
 
-# Startup Script (CRITICAL: Added --allow-root)
+# 8. Create Startup Script (FIXED: --allow-root flag)
 RUN echo '#!/bin/bash' > /usr/local/bin/start-jupyter.sh && \
     echo 'set -e' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'jupyter lab --config /home/jupyter/.jupyter/jupyter_server_config.py --allow-root' >> /usr/local/bin/start-jupyter.sh && \
+    echo '' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo "============================================"' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo "  GCP Workbench - Starting Jupyter"' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo "============================================"' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo "User: $(whoami)"' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo "UID: $(id -u)"' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo "Python: $(python3 --version 2>&1)"' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo "R: $(R --version 2>&1 | head -1)"' >> /usr/local/bin/start-jupyter.sh && \
+    echo '' >> /usr/local/bin/start-jupyter.sh && \
+    echo '# Ensure directories exist' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'mkdir -p ~/.local/share/jupyter/kernels' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'mkdir -p ~/.local/share/jupyter/runtime' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'mkdir -p ~/.jupyter' >> /usr/local/bin/start-jupyter.sh && \
+    echo '' >> /usr/local/bin/start-jupyter.sh && \
+    echo '# Copy config if running as root' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'if [ "$(id -u)" = "0" ]; then' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    cp -n /home/jupyter/.jupyter/jupyter_server_config.py /root/.jupyter/ 2>/dev/null || true' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'fi' >> /usr/local/bin/start-jupyter.sh && \
+    echo '' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo ""' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo "Available kernels:"' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'jupyter kernelspec list' >> /usr/local/bin/start-jupyter.sh && \
+    echo '' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo ""' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'echo "Starting JupyterLab on port 8080..."' >> /usr/local/bin/start-jupyter.sh && \
+    echo '' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'exec jupyter lab \' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    --ip=0.0.0.0 \' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    --port=8080 \' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    --no-browser \' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    --notebook-dir=/home/jupyter \' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    --ServerApp.token="" \' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    --ServerApp.password="" \' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    --ServerApp.allow_origin="*" \' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    --ServerApp.allow_remote_access=True \' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    --ServerApp.allow_root=True \' >> /usr/local/bin/start-jupyter.sh && \
+    echo '    --allow-root' >> /usr/local/bin/start-jupyter.sh && \
     chmod +x /usr/local/bin/start-jupyter.sh
 
-# 8. Security Cleanup
+# 9. Security Cleanup
 RUN find /usr -type f -perm /6000 -exec chmod a-s {} \; 2>/dev/null || true && \
     rm -rf /tmp/* /var/tmp/* /root/.cache
 
+# 10. Health Check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/api || exit 1
+
 EXPOSE 8080
 
+# NOTE: We keep USER jupyter for security, but GCP will override this
+# The --allow-root flag ensures it works either way
 USER jupyter
 WORKDIR /home/jupyter
 

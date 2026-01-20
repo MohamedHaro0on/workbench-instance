@@ -1,16 +1,17 @@
 # ==============================================================================
-# GCP WORKBENCH - SECURE V10 (THE "IT WORKS" BUILD)
-# Fixes: R Kernel Crash (Missing libzmq5), HDF5, Git, Curl, Python CVEs
+# GCP WORKBENCH - SECURE V11 (ROBUST BUILD)
+# Fixes: IRkernel crash, Library paths, HDF5/Git/Curl/Python CVEs
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# STAGE 1: The Builder (Compiles secure versions of tools)
+# STAGE 1: Builder (Compiles secure versions of tools)
 # ------------------------------------------------------------------------------
 FROM debian:bookworm-slim AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install dependencies required for compilation
+# Includes autoconf (for Git) and cmake/ssl (for others)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential autoconf wget ca-certificates libssl-dev zlib1g-dev \
     libncurses5-dev libgdbm-dev libnss3-dev libreadline-dev libffi-dev \
@@ -49,7 +50,6 @@ RUN cd /tmp && \
     make install
 
 # 3. Build Secure Git (Fixes CVE-2024-52005)
-# Note: 'make configure' uses autoconf
 RUN cd /tmp && \
     GIT_VER="2.48.1" && \
     wget -q https://mirrors.edge.kernel.org/pub/software/scm/git/git-${GIT_VER}.tar.gz && \
@@ -95,7 +95,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates gnupg dirmngr libxml2-dev libssl-dev libcurl4-openssl-dev \
     libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev \
-    libpng-dev libtiff5-dev libjpeg-dev make wget && rm -rf /var/lib/apt/lists/*
+    libpng-dev libtiff5-dev libjpeg-dev make wget libzmq3-dev && rm -rf /var/lib/apt/lists/*
 
 # Add R Repo
 RUN gpg --batch --keyserver keyserver.ubuntu.com --recv-keys 'B8F25A8A73EACF41' && \
@@ -131,10 +131,9 @@ FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 # Set Path to prioritize our custom compiled tools
 ENV PATH="/usr/local/python/bin:/usr/local/git/bin:/usr/local/curl/bin:/usr/local/patch/bin:/usr/local/hdf5/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/usr/local/python/lib:/usr/local/curl/lib:/usr/local/hdf5/lib"
 
 # 1. Install Runtime Dependencies (Headless/Server versions only)
-# FIX: Added libzmq5 and libsodium23 (Required for IRkernel)
+# FIX: Added libzmq5, libsodium23 (Required for IRkernel)
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
@@ -185,22 +184,30 @@ COPY --from=builder /usr/local/git /usr/local/git
 COPY --from=builder /usr/local/patch /usr/local/patch
 COPY --from=builder /usr/local/hdf5 /usr/local/hdf5
 
-# 4. Symlinks
+# 4. CRITICAL FIX: Register shared libraries so R can find them
+# This fixes the "IRkernel crash" by telling the OS where our custom Python libraries are
+RUN echo "/usr/local/python/lib" > /etc/ld.so.conf.d/custom_python.conf && \
+    echo "/usr/local/curl/lib" > /etc/ld.so.conf.d/custom_curl.conf && \
+    echo "/usr/local/hdf5/lib" > /etc/ld.so.conf.d/custom_hdf5.conf && \
+    ldconfig
+
+# 5. Symlinks
 RUN ln -sf /usr/local/python/bin/python3 /usr/local/bin/python && \
     ln -sf /usr/local/python/bin/pip3 /usr/local/bin/pip && \
     ln -sf /usr/local/git/bin/git /usr/bin/git && \
     ln -sf /usr/local/curl/bin/curl /usr/bin/curl
 
-# 5. Copy R Libraries
+# 6. Copy R Libraries
 COPY --from=r-builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 RUN mkdir -p /etc/R && \
-    echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/bookworm/latest"))' >> /etc/R/Rprofile.site
+    echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/bookworm/latest"))' >> /etc/R/Rprofile.site && \
+    echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
 
-# 6. Setup GCP Workbench User
+# 7. Setup GCP Workbench User
 RUN groupadd -g 100 users 2>/dev/null || true && \
     useradd -m -u 1000 -g users -s /bin/bash jupyter
 
-# 7. Install Jupyter Ecosystem
+# 8. Install Jupyter Ecosystem
 # Note: Installs into /usr/local/python/lib/python3.12/site-packages
 RUN pip install --no-cache-dir \
     jupyterlab==4.4.1 \
@@ -209,23 +216,25 @@ RUN pip install --no-cache-dir \
     jupyter-server-proxy==4.4.0 \
     traitlets==5.14.3
 
-# 8. Create Jupyter Symlinks for R to find
-# This ensures R finds the 'jupyter' command which is hidden in our custom python path
+# 9. Link Jupyter Command
 RUN ln -sf /usr/local/python/bin/jupyter /usr/local/bin/jupyter
 
-# 9. Register R Kernel
-RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
+# 10. Register R Kernel
+# We verify jupyter exists first to fail early if path is wrong
+RUN jupyter --version && \
+    R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
 
-# 10. Configure Jupyter
+# 11. Configure Jupyter
 RUN mkdir -p /home/jupyter/.jupyter
+# Note: You MUST provide jupyter_server_config.py in your build context
 COPY jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
 
-# 11. Startup Script
+# 12. Startup Script
 RUN echo '#!/bin/bash\n\
 jupyter lab --ip=0.0.0.0 --port=8080 --no-browser --allow-root --NotebookApp.token="" --NotebookApp.password=""' > /usr/local/bin/start-jupyter.sh && \
     chmod +x /usr/local/bin/start-jupyter.sh
 
-# 12. Final Permissions
+# 13. Final Permissions
 RUN mkdir -p /home/jupyter/.local/share/jupyter && \
     chown -R jupyter:users /home/jupyter
 
