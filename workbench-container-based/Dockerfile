@@ -1,6 +1,6 @@
 # ==============================================================================
-# GCP WORKBENCH - SECURE V8 (FIXED BUILD)
-# Fixes: HDF5 Build Error, Git CVE, Curl CVE, Python CVEs
+# GCP WORKBENCH - SECURE V9 (FINAL ROBUST)
+# Fixes: Missing 'autoconf' for Git build, HDF5 Thread Safety
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -11,8 +11,10 @@ FROM debian:bookworm-slim AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install dependencies required for compilation
+# ADDED: autoconf (Required for 'make configure' in Git build)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    autoconf \
     wget \
     ca-certificates \
     libssl-dev \
@@ -32,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 1. Build Secure HDF5 (Fixes Critical CVE-2018-13867)
-# FIX: Added --disable-hl to resolve thread-safety conflict
+# Note: --disable-hl required when --enable-threadsafe is used
 RUN cd /tmp && \
     wget -q https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.14/hdf5-1.14.3/src/hdf5-1.14.3.tar.gz && \
     tar -xzf hdf5-1.14.3.tar.gz && \
@@ -63,6 +65,7 @@ RUN cd /tmp && \
     make install
 
 # 3. Build Secure Git (Fixes CVE-2024-52005)
+# Note: 'make configure' uses autoconf
 RUN cd /tmp && \
     GIT_VER="2.48.1" && \
     wget -q https://mirrors.edge.kernel.org/pub/software/scm/git/git-${GIT_VER}.tar.gz && \
