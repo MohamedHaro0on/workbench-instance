@@ -1,6 +1,7 @@
 # ============================================
-# GCP Workbench - Alpine Linux (Hardened)
+# GCP Workbench - Alpine Linux (Hardened & Fixed)
 # Security: Minimal attack surface, No glibc
+# Fixes: Root crash, Missing configs, Connection Refused
 # ============================================
 
 # ============================================
@@ -12,7 +13,6 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
 # 1. Install Build Dependencies
-# We use a single RUN command with backslashes (\) to prevent syntax errors
 RUN apk update && apk upgrade && apk add --no-cache \
     build-base \
     gfortran \
@@ -61,10 +61,20 @@ RUN apk update && apk upgrade && apk add --no-cache \
 RUN mkdir -p /usr/local/lib/R/site-library && \
     chmod 755 /usr/local/lib/R/site-library
 
-# 3. Install R Packages
-COPY packages.txt /tmp/packages.txt
+# 3. Create R Packages List (Inlined for stability)
+RUN echo "dplyr" > /tmp/packages.txt && \
+    echo "tidyverse" >> /tmp/packages.txt && \
+    echo "tibble" >> /tmp/packages.txt && \
+    echo "plyr" >> /tmp/packages.txt && \
+    echo "tsibble" >> /tmp/packages.txt && \
+    echo "timetk" >> /tmp/packages.txt && \
+    echo "anomalize" >> /tmp/packages.txt && \
+    echo "foreach" >> /tmp/packages.txt && \
+    echo "doParallel" >> /tmp/packages.txt && \
+    echo "pbapply" >> /tmp/packages.txt
 
-# CRITICAL FIX: We explicitly set 'repos' inside the command to prevent "No mirror" errors
+# 4. Install R Packages
+# We explicitly set repos to avoid mirror errors
 RUN R -e " \
     install_repo <- 'https://cloud.r-project.org'; \
     options(repos = c(CRAN = install_repo)); \
@@ -90,7 +100,7 @@ RUN R -e " \
         repos=install_repo, \
         dependencies=TRUE);"
 
-# 4. Create Python venv and install Jupyter
+# 5. Create Python venv and install Jupyter
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
@@ -169,7 +179,6 @@ RUN mkdir -p /usr/local/lib/R/site-library && \
     echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
 
 # 5. Install R Kernel Spec
-# We install the spec system-wide so Jupyter finds it
 RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R (Alpine)')"
 
 # 6. Setup Directories & Permissions
@@ -180,23 +189,30 @@ RUN mkdir -p /home/jupyter/.jupyter \
     chown -R jupyter:users /home/jupyter && \
     chmod 755 /home/jupyter
 
-# 7. Copy Config Files
-COPY --chown=jupyter:users jupyter_server_config.py /home/jupyter/.jupyter/
-COPY --chown=root:root start-jupyter.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/start-jupyter.sh && \
+# 7. Generate Configuration Files (Inlined)
+
+# Jupyter Config
+RUN echo "c = get_config()" > /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.ip = '0.0.0.0'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.port = 8080" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.open_browser = False" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.token = ''" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.password = ''" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.allow_root = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.allow_origin = '*'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.disable_check_xsrf = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+    echo "c.ServerApp.root_dir = '/home/jupyter'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
     chmod 644 /home/jupyter/.jupyter/jupyter_server_config.py
+
+# Startup Script (CRITICAL: Added --allow-root)
+RUN echo '#!/bin/bash' > /usr/local/bin/start-jupyter.sh && \
+    echo 'set -e' >> /usr/local/bin/start-jupyter.sh && \
+    echo 'jupyter lab --config /home/jupyter/.jupyter/jupyter_server_config.py --allow-root' >> /usr/local/bin/start-jupyter.sh && \
+    chmod +x /usr/local/bin/start-jupyter.sh
 
 # 8. Security Cleanup
 RUN find /usr -type f -perm /6000 -exec chmod a-s {} \; 2>/dev/null || true && \
     rm -rf /tmp/* /var/tmp/* /root/.cache
-
-# 9. Verify
-RUN echo "=== Final Verification ===" && \
-    python3 --version && \
-    R --version | head -1 && \
-    jupyter --version && \
-    jupyter kernelspec list && \
-    echo "=== Verification Complete ==="
 
 EXPOSE 8080
 

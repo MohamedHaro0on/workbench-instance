@@ -1,6 +1,6 @@
 # ==============================================================================
-# GCP WORKBENCH - SECURE V9 (FINAL ROBUST)
-# Fixes: Missing 'autoconf' for Git build, HDF5 Thread Safety
+# GCP WORKBENCH - SECURE V10 (THE "IT WORKS" BUILD)
+# Fixes: R Kernel Crash (Missing libzmq5), HDF5, Git, Curl, Python CVEs
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -11,27 +11,11 @@ FROM debian:bookworm-slim AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install dependencies required for compilation
-# ADDED: autoconf (Required for 'make configure' in Git build)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    autoconf \
-    wget \
-    ca-certificates \
-    libssl-dev \
-    zlib1g-dev \
-    libncurses5-dev \
-    libgdbm-dev \
-    libnss3-dev \
-    libreadline-dev \
-    libffi-dev \
-    libbz2-dev \
-    liblzma-dev \
-    gettext \
-    libcurl4-openssl-dev \
-    libexpat1-dev \
-    libpcre2-dev \
-    cmake \
-    && rm -rf /var/lib/apt/lists/*
+    build-essential autoconf wget ca-certificates libssl-dev zlib1g-dev \
+    libncurses5-dev libgdbm-dev libnss3-dev libreadline-dev libffi-dev \
+    libbz2-dev liblzma-dev gettext libcurl4-openssl-dev libexpat1-dev \
+    libpcre2-dev cmake && rm -rf /var/lib/apt/lists/*
 
 # 1. Build Secure HDF5 (Fixes Critical CVE-2018-13867)
 # Note: --disable-hl required when --enable-threadsafe is used
@@ -109,22 +93,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install R Build Deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    gnupg \
-    dirmngr \
-    libxml2-dev \
-    libssl-dev \
-    libcurl4-openssl-dev \
-    libfontconfig1-dev \
-    libharfbuzz-dev \
-    libfribidi-dev \
-    libfreetype6-dev \
-    libpng-dev \
-    libtiff5-dev \
-    libjpeg-dev \
-    make \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates gnupg dirmngr libxml2-dev libssl-dev libcurl4-openssl-dev \
+    libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev \
+    libpng-dev libtiff5-dev libjpeg-dev make wget && rm -rf /var/lib/apt/lists/*
 
 # Add R Repo
 RUN gpg --batch --keyserver keyserver.ubuntu.com --recv-keys 'B8F25A8A73EACF41' && \
@@ -163,6 +134,7 @@ ENV PATH="/usr/local/python/bin:/usr/local/git/bin:/usr/local/curl/bin:/usr/loca
 ENV LD_LIBRARY_PATH="/usr/local/python/lib:/usr/local/curl/lib:/usr/local/hdf5/lib"
 
 # 1. Install Runtime Dependencies (Headless/Server versions only)
+# FIX: Added libzmq5 and libsodium23 (Required for IRkernel)
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
@@ -181,6 +153,9 @@ RUN apt-get update && \
         libjpeg62-turbo \
         libpangocairo-1.0-0 \
         libcairo2 \
+        libzmq5 \
+        libsodium23 \
+        openssl \
         r-base-core \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -226,6 +201,7 @@ RUN groupadd -g 100 users 2>/dev/null || true && \
     useradd -m -u 1000 -g users -s /bin/bash jupyter
 
 # 7. Install Jupyter Ecosystem
+# Note: Installs into /usr/local/python/lib/python3.12/site-packages
 RUN pip install --no-cache-dir \
     jupyterlab==4.4.1 \
     notebook==7.4.2 \
@@ -233,19 +209,23 @@ RUN pip install --no-cache-dir \
     jupyter-server-proxy==4.4.0 \
     traitlets==5.14.3
 
-# 8. Register R Kernel
+# 8. Create Jupyter Symlinks for R to find
+# This ensures R finds the 'jupyter' command which is hidden in our custom python path
+RUN ln -sf /usr/local/python/bin/jupyter /usr/local/bin/jupyter
+
+# 9. Register R Kernel
 RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
 
-# 9. Configure Jupyter
+# 10. Configure Jupyter
 RUN mkdir -p /home/jupyter/.jupyter
 COPY jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
 
-# 10. Startup Script
+# 11. Startup Script
 RUN echo '#!/bin/bash\n\
 jupyter lab --ip=0.0.0.0 --port=8080 --no-browser --allow-root --NotebookApp.token="" --NotebookApp.password=""' > /usr/local/bin/start-jupyter.sh && \
     chmod +x /usr/local/bin/start-jupyter.sh
 
-# 11. Final Permissions
+# 12. Final Permissions
 RUN mkdir -p /home/jupyter/.local/share/jupyter && \
     chown -R jupyter:users /home/jupyter
 
