@@ -1,6 +1,6 @@
 # ==============================================================================
 # GCP WORKBENCH - HARDENED CUSTOM IMAGE
-# Base: Official GCP Workbench Container
+# Base: Official GCP Workbench Container (Ubuntu-based)
 # Additions: R + Tidyverse + TimeTK + Anomalize
 # Security: Updated/Compiled vulnerable packages from source
 # ==============================================================================
@@ -96,10 +96,9 @@ RUN cd /tmp && \
     make install
 
 # ------------------------------------------------------------------------------
-# STAGE 2: R Package Builder
-# Build R packages using Posit Package Manager (binary packages)
+# STAGE 2: R Package Builder (Using Ubuntu for compatibility)
 # ------------------------------------------------------------------------------
-FROM debian:bookworm-slim AS r-builder
+FROM ubuntu:22.04 AS r-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -107,7 +106,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     gnupg \
-    dirmngr \
+    software-properties-common \
     libxml2-dev \
     libssl-dev \
     libcurl4-openssl-dev \
@@ -123,16 +122,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Add CRAN Repository
-RUN gpg --batch --keyserver keyserver.ubuntu.com --recv-keys 'B8F25A8A73EACF41' && \
-    gpg --batch --export --armor 'B8F25A8A73EACF41' | gpg --dearmor -o /usr/share/keyrings/cran-archive-keyring.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/cran-archive-keyring.gpg] https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" > /etc/apt/sources.list.d/cran.list
+# Add CRAN Repository for Ubuntu
+RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | gpg --dearmor -o /usr/share/keyrings/r-project.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/r-project.gpg] https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" > /etc/apt/sources.list.d/r-project.list
 
 # Install R
 RUN apt-get update && apt-get install -y --no-install-recommends r-base-dev
 
-# Configure Posit Package Manager for binary packages
-RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/bookworm/latest"))' >> /etc/R/Rprofile.site
+# Configure Posit Package Manager for Ubuntu binary packages
+RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"))' >> /etc/R/Rprofile.site
 
 # Install requested R packages
 RUN R -e "install.packages(c( \
@@ -150,12 +148,12 @@ RUN R -e "install.packages(c( \
     ), Ncpus = parallel::detectCores())"
 
 # ------------------------------------------------------------------------------
-# STAGE 3: Final Image (Based on GCP Workbench)
+# STAGE 3: Final Image (Based on GCP Workbench - Ubuntu)
 # ------------------------------------------------------------------------------
 FROM gcr.io/deeplearning-platform-release/workbench-container:latest
 
 # Metadata
-LABEL maintainer="your-email@example.com"
+LABEL maintainer="mohamed.ahmed.ali.haroon@gmail.com"
 LABEL description="GCP Workbench - Hardened with R + Tidyverse + Security Updates"
 LABEL version="1.0"
 
@@ -176,12 +174,24 @@ RUN apt-get update && \
     apt-get dist-upgrade -y
 
 # ------------------------------------------------------------------------------
-# STEP 2: Install R Runtime Dependencies
+# STEP 2: Add CRAN Repository and Install R
+# ------------------------------------------------------------------------------
+# Add CRAN repo for Ubuntu
+RUN apt-get install -y --no-install-recommends \
+    gnupg \
+    software-properties-common \
+    wget && \
+    wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | gpg --dearmor -o /usr/share/keyrings/r-project.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/r-project.gpg] https://cloud.r-project.org/bin/linux/ubuntu $(lsb_release -cs)-cran40/" > /etc/apt/sources.list.d/r-project.list && \
+    apt-get update
+
+# ------------------------------------------------------------------------------
+# STEP 3: Install R Runtime Dependencies (Ubuntu packages)
 # ------------------------------------------------------------------------------
 RUN apt-get install -y --no-install-recommends \
     # R Core (headless, no X11)
     r-base-core \
-    # Runtime libraries for R packages
+    # Runtime libraries for R packages (Ubuntu names)
     libxml2 \
     libssl3 \
     libgomp1 \
@@ -190,8 +200,9 @@ RUN apt-get install -y --no-install-recommends \
     libfontconfig1 \
     libfreetype6 \
     libpng16-16 \
-    libtiff6 \
-    libjpeg62-turbo \
+    libtiff5 \
+    libjpeg8 \
+    libjpeg-turbo8 \
     libpangocairo-1.0-0 \
     libcairo2 \
     libzmq5 \
@@ -200,7 +211,7 @@ RUN apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------------------------
-# STEP 3: Security Hardening - Remove Vulnerable Packages
+# STEP 4: Security Hardening - Remove Vulnerable Packages
 # ------------------------------------------------------------------------------
 RUN apt-get update && \
     apt-get remove -y --purge \
@@ -237,7 +248,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------------------------
-# STEP 4: Copy Secure Compiled Binaries
+# STEP 5: Copy Secure Compiled Binaries
 # ------------------------------------------------------------------------------
 COPY --from=security-builder /opt/secure/curl /opt/secure/curl
 COPY --from=security-builder /opt/secure/git /opt/secure/git
@@ -255,22 +266,22 @@ RUN ln -sf /opt/secure/git/bin/git /usr/local/bin/git && \
     ln -sf /opt/secure/patch/bin/patch /usr/local/bin/patch
 
 # ------------------------------------------------------------------------------
-# STEP 5: Copy R Libraries
+# STEP 6: Copy R Libraries
 # ------------------------------------------------------------------------------
 COPY --from=r-builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 
 # Configure R
 RUN mkdir -p /etc/R && \
-    echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/bookworm/latest"))' >> /etc/R/Rprofile.site && \
+    echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"))' >> /etc/R/Rprofile.site && \
     echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
 
 # ------------------------------------------------------------------------------
-# STEP 6: Register R Kernel for Jupyter
+# STEP 7: Register R Kernel for Jupyter
 # ------------------------------------------------------------------------------
 RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R')"
 
 # ------------------------------------------------------------------------------
-# STEP 7: Additional Security Hardening
+# STEP 8: Additional Security Hardening
 # ------------------------------------------------------------------------------
 RUN \
     # Remove SUID/SGID bits (privilege escalation vectors)
@@ -285,7 +296,7 @@ RUN \
     find /usr/share/locale -mindepth 1 -maxdepth 1 ! -name 'en*' -exec rm -rf {} \; 2>/dev/null || true
 
 # ------------------------------------------------------------------------------
-# STEP 8: Verification
+# STEP 9: Verification
 # ------------------------------------------------------------------------------
 RUN echo "=== Verification ===" && \
     echo "" && \
@@ -311,16 +322,9 @@ RUN echo "=== Verification ===" && \
     echo "=== Verification Complete ==="
 
 # ------------------------------------------------------------------------------
-# STEP 9: Health Check (GCP Compatible)
+# STEP 10: Health Check (GCP Compatible)
 # ------------------------------------------------------------------------------
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -sf http://localhost:8080/api || exit 1
-
-# The base image already configures:
-# - Jupyter settings (allow_root, token, etc.)
-# - Port 8080
-# - Entrypoint and CMD
-# - User configuration
-# We inherit all of these automatically!
 
 EXPOSE 8080
