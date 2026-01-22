@@ -1,13 +1,16 @@
 # ============================================
-# GCP Workbench - Alpine Linux (Hardened & Fixed)
-# Security: Minimal attack surface, No glibc
-# Fixes: Root crash, Missing configs, Connection Refused
+# GCP Workbench - Alpine Linux (Hardened)
+# Security Fixes Applied:
+#   - CVE-2025-53000: nbconvert Windows path traversal
+#   - CVE-2025-8869: pip tar extraction symlink
+#   - CVE-2026-23949: jaraco.context path traversal
+#   - CVE-2025-59842: JupyterLab LaTeX noopener
 # ============================================
 
 # ============================================
 # Stage 1: Build Stage
 # ============================================
-FROM alpine:3.20 AS builder
+FROM alpine:3.21 AS builder
 
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
@@ -61,7 +64,7 @@ RUN apk update && apk upgrade && apk add --no-cache \
 RUN mkdir -p /usr/local/lib/R/site-library && \
     chmod 755 /usr/local/lib/R/site-library
 
-# 3. Create R Packages List (Inlined for stability)
+# 3. Create R Packages List
 RUN echo "dplyr" > /tmp/packages.txt && \
     echo "tibble" >> /tmp/packages.txt && \
     echo "tidyr" >> /tmp/packages.txt && \
@@ -76,49 +79,58 @@ RUN echo "dplyr" > /tmp/packages.txt && \
     echo "doParallel" >> /tmp/packages.txt
 
 # 4. Install R Packages
-RUN R -e " \
+RUN R -e "\
     install_repo <- 'https://cloud.r-project.org'; \
     options(repos = c(CRAN = install_repo)); \
     packages <- readLines('/tmp/packages.txt'); \
     packages <- trimws(packages); \
-    packages <- packages[packages != '' & !grepl('^#', packages)]; \
-    cat('Installing packages:', paste(packages, collapse=', '), '\n'); \
+    packages <- packages[packages != '']; \
     for (pkg in packages) { \
-        cat('\n=== Installing:', pkg, '===\n'); \
+        cat('Installing:', pkg, '\n'); \
         tryCatch({ \
-            install.packages(pkg, \
-                lib='/usr/local/lib/R/site-library', \
-                repos=install_repo, \
-                dependencies=TRUE, \
-                Ncpus=parallel::detectCores()); \
+            install.packages(pkg, lib='/usr/local/lib/R/site-library', repos=install_repo, dependencies=TRUE, Ncpus=parallel::detectCores()); \
         }, error = function(e) { \
-            cat('WARNING: Failed to install', pkg, ':', conditionMessage(e), '\n'); \
+            cat('WARNING: Failed to install', pkg, '\n'); \
         }); \
     }; \
-    cat('\n=== Installing IRkernel ===\n'); \
-    install.packages('IRkernel', \
-        lib='/usr/local/lib/R/site-library', \
-        repos=install_repo, \
-        dependencies=TRUE);"
+    install.packages('IRkernel', lib='/usr/local/lib/R/site-library', repos=install_repo, dependencies=TRUE);"
 
-# 5. Create Python venv and install Jupyter
+# 5. Create Python venv
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+# 6. Upgrade pip first to fix CVE-2025-8869
+RUN pip install --no-cache-dir --upgrade "pip>=25.3"
+
+# 7. Upgrade setuptools to fix CVE-2026-23949 (jaraco.context)
+RUN pip install --no-cache-dir --upgrade "setuptools>=78.1.1"
+
+# 8. Install Jupyter packages with security patches
+RUN pip install --no-cache-dir --upgrade wheel && \
     pip install --no-cache-dir \
-    jupyterlab==4.4.1 \
-    notebook==7.4.2 \
-    jupyter-server==2.15.0 \
-    jupyter-server-proxy==4.4.0 \
-    traitlets==5.14.3 \
-    ipykernel \
-    ipywidgets
+        "jupyterlab>=4.4.8" \
+        "notebook>=7.4.2" \
+        "jupyter-server>=2.15.0" \
+        "jupyter-server-proxy>=4.4.0" \
+        "traitlets>=5.14.3" \
+        "nbconvert>=7.16.7" \
+        "jaraco.context>=6.0.1" \
+        ipykernel \
+        ipywidgets
+
+# 9. Verify security patches
+RUN echo "=== Security Patch Verification ===" && \
+    pip show pip | grep -E "^Version:" && \
+    pip show setuptools | grep -E "^Version:" && \
+    pip show jupyterlab | grep -E "^Version:" && \
+    pip show nbconvert | grep -E "^Version:" && \
+    pip show jaraco.context | grep -E "^Version:" && \
+    echo "=== Verification Complete ==="
 
 # ============================================
 # Stage 2: Final Runtime
 # ============================================
-FROM alpine:3.20
+FROM alpine:3.21
 
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
@@ -167,7 +179,7 @@ RUN apk update && apk upgrade && apk add --no-cache \
     ncurses-terminfo-base \
     && rm -rf /var/cache/apk/*
 
-# 2. Create User (still useful for file ownership)
+# 2. Create non-root user
 RUN adduser -D -u 1000 -G users -s /bin/bash -h /home/jupyter jupyter
 
 # 3. Copy artifacts from builder
@@ -179,95 +191,136 @@ RUN mkdir -p /usr/local/lib/R/site-library && \
     echo 'options(repos = c(CRAN = "https://cloud.r-project.org"))' >> /etc/R/Rprofile.site && \
     echo '.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))' >> /etc/R/Rprofile.site
 
-# 5. Install R Kernel Spec (system-wide for root access)
+# 5. Install R Kernel Spec (system-wide)
 RUN R -e "IRkernel::installspec(user = FALSE, name = 'ir', displayname = 'R (Alpine)')"
 
-# 6. Setup Directories & Permissions
-RUN mkdir -p /home/jupyter/.jupyter \
-    /home/jupyter/.local/share/jupyter/kernels \
-    /home/jupyter/.local/share/jupyter/runtime \
-    /home/jupyter/work \
-    /root/.jupyter \
-    /root/.local/share/jupyter/kernels \
-    /root/.local/share/jupyter/runtime && \
+# 6. Setup Directories
+RUN mkdir -p /home/jupyter/.jupyter && \
+    mkdir -p /home/jupyter/.local/share/jupyter/kernels && \
+    mkdir -p /home/jupyter/.local/share/jupyter/runtime && \
+    mkdir -p /home/jupyter/work && \
+    mkdir -p /root/.jupyter && \
+    mkdir -p /root/.local/share/jupyter/kernels && \
+    mkdir -p /root/.local/share/jupyter/runtime && \
     chown -R jupyter:users /home/jupyter && \
     chmod 755 /home/jupyter
 
-# 7. Generate Jupyter Configuration (FIXED: allow_root = True)
-RUN echo "c = get_config()" > /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.ip = '0.0.0.0'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.port = 8080" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.open_browser = False" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.token = ''" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.password = ''" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.allow_root = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.allow_origin = '*'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.allow_remote_access = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.disable_check_xsrf = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.root_dir = '/home/jupyter'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.notebook_dir = '/home/jupyter'" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.ServerApp.terminals_enabled = True" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.MappingKernelManager.cull_idle_timeout = 0" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
-    echo "c.MappingKernelManager.cull_interval = 0" >> /home/jupyter/.jupyter/jupyter_server_config.py && \
+# 7. Create Jupyter Configuration
+RUN printf '%s\n' \
+    'c = get_config()' \
+    '' \
+    '# Network settings' \
+    'c.ServerApp.ip = "0.0.0.0"' \
+    'c.ServerApp.port = 8080' \
+    'c.ServerApp.open_browser = False' \
+    '' \
+    '# Authentication (disabled for GCP proxy)' \
+    'c.ServerApp.token = ""' \
+    'c.ServerApp.password = ""' \
+    '' \
+    '# Root execution (GCP Workbench runs as root)' \
+    'c.ServerApp.allow_root = True' \
+    '' \
+    '# Remote access settings' \
+    'c.ServerApp.allow_origin = "*"' \
+    'c.ServerApp.allow_remote_access = True' \
+    'c.ServerApp.allow_credentials = True' \
+    'c.ServerApp.disable_check_xsrf = True' \
+    'c.ServerApp.trust_xheaders = True' \
+    '' \
+    '# Directory settings' \
+    'c.ServerApp.root_dir = "/home/jupyter"' \
+    'c.ServerApp.notebook_dir = "/home/jupyter"' \
+    '' \
+    '# Features' \
+    'c.ServerApp.terminals_enabled = True' \
+    'c.MappingKernelManager.cull_idle_timeout = 0' \
+    'c.MappingKernelManager.cull_interval = 0' \
+    'c.ContentsManager.allow_hidden = True' \
+    > /home/jupyter/.jupyter/jupyter_server_config.py && \
     chmod 644 /home/jupyter/.jupyter/jupyter_server_config.py && \
     cp /home/jupyter/.jupyter/jupyter_server_config.py /root/.jupyter/jupyter_server_config.py
 
-# 8. Create Startup Script (FIXED: --allow-root flag)
-RUN echo '#!/bin/bash' > /usr/local/bin/start-jupyter.sh && \
-    echo 'set -e' >> /usr/local/bin/start-jupyter.sh && \
-    echo '' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo "============================================"' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo "  GCP Workbench - Starting Jupyter"' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo "============================================"' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo "User: $(whoami)"' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo "UID: $(id -u)"' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo "Python: $(python3 --version 2>&1)"' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo "R: $(R --version 2>&1 | head -1)"' >> /usr/local/bin/start-jupyter.sh && \
-    echo '' >> /usr/local/bin/start-jupyter.sh && \
-    echo '# Ensure directories exist' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'mkdir -p ~/.local/share/jupyter/kernels' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'mkdir -p ~/.local/share/jupyter/runtime' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'mkdir -p ~/.jupyter' >> /usr/local/bin/start-jupyter.sh && \
-    echo '' >> /usr/local/bin/start-jupyter.sh && \
-    echo '# Copy config if running as root' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'if [ "$(id -u)" = "0" ]; then' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    cp -n /home/jupyter/.jupyter/jupyter_server_config.py /root/.jupyter/ 2>/dev/null || true' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'fi' >> /usr/local/bin/start-jupyter.sh && \
-    echo '' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo ""' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo "Available kernels:"' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'jupyter kernelspec list' >> /usr/local/bin/start-jupyter.sh && \
-    echo '' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo ""' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'echo "Starting JupyterLab on port 8080..."' >> /usr/local/bin/start-jupyter.sh && \
-    echo '' >> /usr/local/bin/start-jupyter.sh && \
-    echo 'exec jupyter lab \' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    --ip=0.0.0.0 \' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    --port=8080 \' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    --no-browser \' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    --notebook-dir=/home/jupyter \' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    --ServerApp.token="" \' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    --ServerApp.password="" \' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    --ServerApp.allow_origin="*" \' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    --ServerApp.allow_remote_access=True \' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    --ServerApp.allow_root=True \' >> /usr/local/bin/start-jupyter.sh && \
-    echo '    --allow-root' >> /usr/local/bin/start-jupyter.sh && \
+# 8. Create Startup Script
+RUN printf '%s\n' \
+    '#!/bin/bash' \
+    'set -e' \
+    '' \
+    'echo "============================================"' \
+    'echo "  GCP Workbench - Starting Jupyter"' \
+    'echo "============================================"' \
+    'echo "User: $(whoami)"' \
+    'echo "UID: $(id -u)"' \
+    'echo "GID: $(id -g)"' \
+    'echo "Python: $(python3 --version 2>&1)"' \
+    'echo "R: $(R --version 2>&1 | head -1)"' \
+    '' \
+    '# Ensure directories exist' \
+    'mkdir -p ~/.local/share/jupyter/kernels' \
+    'mkdir -p ~/.local/share/jupyter/runtime' \
+    'mkdir -p ~/.jupyter' \
+    '' \
+    '# Copy config if running as root' \
+    'if [ "$(id -u)" = "0" ] && [ ! -f /root/.jupyter/jupyter_server_config.py ]; then' \
+    '    cp /home/jupyter/.jupyter/jupyter_server_config.py /root/.jupyter/ 2>/dev/null || true' \
+    'fi' \
+    '' \
+    'echo ""' \
+    'echo "Available kernels:"' \
+    'jupyter kernelspec list' \
+    '' \
+    'echo ""' \
+    'echo "Starting JupyterLab on port 8080..."' \
+    'echo ""' \
+    '' \
+    'exec jupyter lab \' \
+    '    --ip=0.0.0.0 \' \
+    '    --port=8080 \' \
+    '    --no-browser \' \
+    '    --notebook-dir=/home/jupyter \' \
+    '    --ServerApp.token="" \' \
+    '    --ServerApp.password="" \' \
+    '    --ServerApp.allow_origin="*" \' \
+    '    --ServerApp.allow_remote_access=True \' \
+    '    --ServerApp.allow_root=True \' \
+    '    --allow-root' \
+    > /usr/local/bin/start-jupyter.sh && \
     chmod +x /usr/local/bin/start-jupyter.sh
 
-# 9. Security Cleanup
+# 9. Security Hardening
 RUN find /usr -type f -perm /6000 -exec chmod a-s {} \; 2>/dev/null || true && \
-    rm -rf /tmp/* /var/tmp/* /root/.cache
+    rm -rf /tmp/* /var/tmp/* /root/.cache /home/jupyter/.cache
 
-# 10. Health Check
+# 10. Final Verification
+RUN echo "=== Final Verification ===" && \
+    python3 --version && \
+    R --version | head -1 && \
+    jupyter --version && \
+    jupyter kernelspec list && \
+    echo "" && \
+    echo "=== Security Package Versions ===" && \
+    pip show pip | grep -E "^Version:" && \
+    pip show setuptools | grep -E "^Version:" && \
+    pip show jupyterlab | grep -E "^Version:" && \
+    pip show nbconvert | grep -E "^Version:" && \
+    echo "=== Verification Complete ==="
+
+# 11. Health Check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8080/api || exit 1
 
 EXPOSE 8080
 
-# NOTE: We keep USER jupyter for security, but GCP will override this
-# The --allow-root flag ensures it works either way
 USER jupyter
 WORKDIR /home/jupyter
+
+LABEL maintainer="mohamedharoon0" \
+      version="1.1" \
+      description="GCP Workbench with R - Alpine Linux (Secure)" \
+      security.cve-2025-53000="patched" \
+      security.cve-2025-8869="patched" \
+      security.cve-2026-23949="patched" \
+      security.cve-2025-59842="patched"
 
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["/usr/local/bin/start-jupyter.sh"]

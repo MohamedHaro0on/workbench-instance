@@ -1,36 +1,42 @@
 #!/bin/bash
-# GCP Workbench Jupyter Startup Script
-
 set -e
 
-echo "=========================================="
-echo "Starting GCP Workbench Jupyter Server"
-echo "=========================================="
-
-# Environment info
+echo "============================================"
+echo "  GCP Workbench - Starting Jupyter"
+echo "============================================"
 echo "User: $(whoami)"
-echo "Working Directory: $(pwd)"
-echo "Python: $(python3 --version)"
-echo "R: $(R --version | head -1)"
+echo "UID: $(id -u)"
+echo "GID: $(id -g)"
+echo "Home: $HOME"
+echo "Python: $(python3 --version 2>&1)"
+echo "R: $(R --version 2>&1 | head -1)"
 
-# Ensure directories exist
-mkdir -p /home/jupyter/.local/share/jupyter/kernels
-mkdir -p /home/jupyter/.jupyter
-mkdir -p /home/jupyter/work
+# Ensure directories exist for current user
+mkdir -p ~/.local/share/jupyter/kernels
+mkdir -p ~/.local/share/jupyter/runtime
+mkdir -p ~/.jupyter
 
-# Verify R kernel is installed
-echo "Checking Jupyter kernels..."
+# Copy config if running as root and config not present
+if [ "$(id -u)" = "0" ] && [ ! -f /root/.jupyter/jupyter_server_config.py ]; then
+    cp /home/jupyter/.jupyter/jupyter_server_config.py /root/.jupyter/ 2>/dev/null || true
+fi
+
+echo ""
+echo "Available kernels:"
 jupyter kernelspec list
 
-# Start Jupyter Lab
+echo ""
 echo "Starting JupyterLab on port 8080..."
+echo ""
+
 exec jupyter lab \
-    --config=/home/jupyter/.jupyter/jupyter_server_config.py \
     --ip=0.0.0.0 \
     --port=8080 \
     --no-browser \
     --notebook-dir=/home/jupyter \
-    --ServerApp.token='' \
-    --ServerApp.password='' \
-    --ServerApp.allow_origin='*' \
-    --ServerApp.allow_remote_access=True
+    --ServerApp.token="" \
+    --ServerApp.password="" \
+    --ServerApp.allow_origin="*" \
+    --ServerApp.allow_remote_access=True \
+    --ServerApp.allow_root=True \
+    --allow-root

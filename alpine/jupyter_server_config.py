@@ -1,71 +1,31 @@
-# GCP Workbench Jupyter Server Configuration
-# Optimized for security and GCP IAP authentication
-
+# Jupyter Server Configuration for GCP Workbench
 c = get_config()
 
-# ===================
-# Server Settings
-# ===================
+# Network settings
 c.ServerApp.ip = '0.0.0.0'
 c.ServerApp.port = 8080
 c.ServerApp.open_browser = False
-c.ServerApp.allow_root = False
 
-# ===================
-# Authentication
-# GCP Workbench uses IAP for auth, so we disable token/password
-# ===================
+# Authentication (disabled for GCP proxy)
 c.ServerApp.token = ''
 c.ServerApp.password = ''
-c.PasswordIdentityProvider.hashed_password = ''
 
-# ===================
-# CORS / Remote Access
-# Required for GCP Workbench proxy
-# ===================
+# CRITICAL: Allow root execution (GCP Workbench runs as root)
+c.ServerApp.allow_root = True
+
+# Remote access settings
 c.ServerApp.allow_origin = '*'
 c.ServerApp.allow_remote_access = True
 c.ServerApp.allow_credentials = True
-
-# ===================
-# Security Settings
-# ===================
-c.ServerApp.disable_check_xsrf = False  # Keep XSRF protection enabled
-
-# Trust X-Forwarded headers from GCP proxy
+c.ServerApp.disable_check_xsrf = True
 c.ServerApp.trust_xheaders = True
 
-# ===================
-# Directory Settings
-# ===================
-c.ServerApp.notebook_dir = '/home/jupyter'
+# Directory settings
 c.ServerApp.root_dir = '/home/jupyter'
-c.ServerApp.preferred_dir = '/home/jupyter/work'
+c.ServerApp.notebook_dir = '/home/jupyter'
 
-# ===================
-# Terminal Settings
-# ===================
+# Features
 c.ServerApp.terminals_enabled = True
-
-# ===================
-# Kernel Settings
-# Disable idle culling (GCP manages instance lifecycle)
-# ===================
 c.MappingKernelManager.cull_idle_timeout = 0
 c.MappingKernelManager.cull_interval = 0
-c.MappingKernelManager.cull_connected = False
-
-# ===================
-# File Settings
-# ===================
 c.ContentsManager.allow_hidden = True
-
-# ===================
-# Logging
-# ===================
-c.ServerApp.log_level = 'INFO'
-
-# ===================
-# Extension Settings
-# ===================
-c.LabApp.expose_app_in_browser = True
