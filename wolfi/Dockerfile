@@ -113,7 +113,7 @@ RUN pip install --no-cache-dir --upgrade wheel && \
         "jupyter-server>=2.15.0" \
         "jupyter-server-proxy>=4.4.0" \
         "traitlets>=5.14.3" \
-        "nbconvert>=7.16.7" \
+        "nbconvert>=7.16.6" \
         "jaraco.context>=6.0.1" \
         ipykernel \
         ipywidgets
