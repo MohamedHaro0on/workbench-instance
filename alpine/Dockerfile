@@ -1,6 +1,6 @@
 # ============================================
 # GCP Workbench - Alpine Linux (Hardened)
-# Simplified Multi-File Build
+# Fixed: tibbletime from CRAN Archive
 # ============================================
 
 # ============================================
@@ -69,10 +69,22 @@ COPY scripts/install-r-packages.R /tmp/install-r-packages.R
 RUN Rscript /tmp/install-r-packages.R
 
 # 4. Verify R packages
-RUN R -e "library(anomalize); library(tidyverse); library(plyr); library(pbapply); \
-    cat('All requested packages loaded successfully\n')"
+RUN R -e "\
+    packages <- c('plyr', 'anomalize', 'foreach', 'tidyverse', 'tibbletime', 'doParallel', 'pbapply', 'dplyr'); \
+    missing <- c(); \
+    for (pkg in packages) { \
+        if (!requireNamespace(pkg, quietly = TRUE)) { \
+            missing <- c(missing, pkg); \
+        } \
+    }; \
+    if (length(missing) > 0) { \
+        cat('MISSING PACKAGES:', paste(missing, collapse=', '), '\n'); \
+        quit(status = 1); \
+    } else { \
+        cat('All client packages verified successfully\n'); \
+    }"
 
-# 5. Cleanup R docs (security scan false positives)
+# 5. Cleanup R docs
 RUN find /usr/local/lib/R/site-library -name "*.html" -delete 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "doc" -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "html" -exec rm -rf {} + 2>/dev/null || true
@@ -192,13 +204,11 @@ RUN echo "=== Final Verification ===" && \
     R --version | head -1 && \
     jupyter --version && \
     jupyter kernelspec list && \
-    echo "--- Verify Client Packages ---" && \
-    R -e "library(plyr); library(anomalize); library(foreach); library(tidyverse); \
-          library(tibbletime); library(doParallel); library(pbapply); library(dplyr); \
-          cat('All client packages OK\n')" && \
+    echo "--- Client Packages ---" && \
+    R -e "for(p in c('plyr','anomalize','foreach','tidyverse','tibbletime','doParallel','pbapply','dplyr')) { cat(p, ':', as.character(packageVersion(p)), '\n') }" && \
     echo "--- CVE Check ---" && \
     python3 -c "from nbconvert.exporters.pdf import PDFExporter; p = PDFExporter(); p.from_notebook_node(None)" 2>&1 || echo "PASS: PDF disabled" && \
-    echo "=== Verification Complete ==="
+    echo "=== Complete ==="
 
 # 11. Health Check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
@@ -210,7 +220,7 @@ USER jupyter
 WORKDIR /home/jupyter
 
 LABEL maintainer="mohamedharoon0" \
-      version="2.0" \
+      version="2.1" \
       description="GCP Workbench with R - Alpine Linux (Hardened)" \
       packages="plyr,anomalize,foreach,tidyverse,tibbletime,parallel,pbapply,dplyr"
 

@@ -1,9 +1,13 @@
 # ============================================
 # R Packages List
-# Client Requested Packages
+# Client Requested + Dependencies
 # ============================================
 
-# Core tidyverse (includes dplyr, tidyr, etc.)
+# NOTE: tibbletime is ARCHIVED on CRAN
+# It will be installed from the CRAN Archive
+# in install-r-packages.R
+
+# Core tidyverse
 tidyverse
 
 # Data manipulation
@@ -16,14 +20,13 @@ purrr
 foreach
 
 # Time series / Anomaly detection
-anomalize
-tibbletime
+# tibbletime  <- ARCHIVED, handled separately
+# anomalize   <- depends on tibbletime, handled separately
 forecast
 timetk
 sweep
 
 # Parallel processing
-parallel
 doParallel
 pbapply
 
