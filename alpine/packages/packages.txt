@@ -1,0 +1,37 @@
+# ============================================
+# R Packages List
+# Client Requested Packages
+# ============================================
+
+# Core tidyverse (includes dplyr, tidyr, etc.)
+tidyverse
+
+# Data manipulation
+dplyr
+plyr
+data.table
+
+# Functional programming
+purrr
+foreach
+
+# Time series / Anomaly detection
+anomalize
+tibbletime
+forecast
+timetk
+sweep
+
+# Parallel processing
+parallel
+doParallel
+pbapply
+
+# Utilities
+jsonlite
+lubridate
+glue
+rlang
+
+# Jupyter integration
+IRkernel

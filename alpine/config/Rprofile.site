@@ -1,0 +1,15 @@
+# ============================================
+# R Configuration
+# ============================================
+
+# Set CRAN mirror
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Set library paths
+.libPaths(c("/usr/local/lib/R/site-library", .libPaths()))
+
+# Disable GUI prompts
+options(menu.graphics = FALSE)
+
+# Set default number of CPUs for parallel operations
+options(Ncpus = parallel::detectCores())
