@@ -1,6 +1,6 @@
 # ============================================
 # GCP Workbench - Alpine Linux (Hardened)
-# Fixed: tibbletime from CRAN Archive
+# Fixed: R package compilation on musl/Alpine
 # ============================================
 
 # ============================================
@@ -11,7 +11,13 @@ FROM alpine:3.20 AS builder
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-# 1. Install Build Dependencies
+# Disable LTO which causes issues on Alpine/musl
+ENV CFLAGS="-O2 -fstack-clash-protection -fno-plt"
+ENV CXXFLAGS="-O2 -fstack-clash-protection -fno-plt"
+ENV FFLAGS="-O2"
+ENV R_MAKEVARS_USER=/tmp/Makevars
+
+# 1. Install Build Dependencies (added util-linux-dev, libuuid)
 RUN apk update && apk upgrade && apk add --no-cache \
     build-base \
     gfortran \
@@ -55,22 +61,35 @@ RUN apk update && apk upgrade && apk add --no-cache \
     libxt-dev \
     openblas-dev \
     lapack-dev \
-    fftw-dev
+    fftw-dev \
+    util-linux-dev \
+    libuuid
 
-# 2. Configure R
+# 2. Create R Makevars to fix compilation issues
+RUN mkdir -p ~/.R && \
+    echo 'CFLAGS = -O2 -fstack-clash-protection -fno-plt' > ~/.R/Makevars && \
+    echo 'CXXFLAGS = -O2 -fstack-clash-protection -fno-plt' >> ~/.R/Makevars && \
+    echo 'CXX11FLAGS = -O2 -fstack-clash-protection -fno-plt' >> ~/.R/Makevars && \
+    echo 'CXX14FLAGS = -O2 -fstack-clash-protection -fno-plt' >> ~/.R/Makevars && \
+    echo 'CXX17FLAGS = -O2 -fstack-clash-protection -fno-plt' >> ~/.R/Makevars && \
+    echo 'FFLAGS = -O2' >> ~/.R/Makevars && \
+    echo 'FCFLAGS = -O2' >> ~/.R/Makevars && \
+    cp ~/.R/Makevars /tmp/Makevars
+
+# 3. Configure R directories
 RUN mkdir -p /usr/local/lib/R/site-library && \
     chmod 755 /usr/local/lib/R/site-library
 
 COPY config/Rprofile.site /etc/R/Rprofile.site
 
-# 3. Copy and install R packages
+# 4. Copy R packages list and install script
 COPY packages/r-packages.txt /tmp/r-packages.txt
 COPY scripts/install-r-packages.R /tmp/install-r-packages.R
 RUN Rscript /tmp/install-r-packages.R
 
-# 4. Verify R packages
+# 5. Verify R packages
 RUN R -e "\
-    packages <- c('plyr', 'anomalize', 'foreach', 'tidyverse', 'tibbletime', 'doParallel', 'pbapply', 'dplyr'); \
+    packages <- c('plyr', 'anomalize', 'foreach', 'tidyverse', 'tibbletime', 'doParallel', 'pbapply', 'dplyr', 'IRkernel'); \
     missing <- c(); \
     for (pkg in packages) { \
         if (!requireNamespace(pkg, quietly = TRUE)) { \
@@ -84,24 +103,24 @@ RUN R -e "\
         cat('All client packages verified successfully\n'); \
     }"
 
-# 5. Cleanup R docs
+# 6. Cleanup R docs
 RUN find /usr/local/lib/R/site-library -name "*.html" -delete 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "doc" -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "html" -exec rm -rf {} + 2>/dev/null || true
 
-# 6. Setup Python virtual environment
+# 7. Setup Python virtual environment
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# 7. Install Python packages
+# 8. Install Python packages
 COPY scripts/install-python-packages.sh /tmp/install-python-packages.sh
 RUN chmod +x /tmp/install-python-packages.sh && /tmp/install-python-packages.sh
 
-# 8. Apply CVE mitigations
+# 9. Apply CVE mitigations
 COPY scripts/apply-cve-mitigations.sh /tmp/apply-cve-mitigations.sh
 RUN chmod +x /tmp/apply-cve-mitigations.sh && /tmp/apply-cve-mitigations.sh
 
-# 9. Cleanup Python docs
+# 10. Cleanup Python docs
 RUN find /opt/venv -name "*.html" -path "*/doc/*" -delete 2>/dev/null || true && \
     find /opt/venv -type d -name "doc" -path "*/site-packages/*" -exec rm -rf {} + 2>/dev/null || true
 
@@ -156,6 +175,7 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     ncurses \
     ncurses-terminfo-base \
     fftw \
+    libuuid \
     && rm -rf /var/cache/apk/*
 
 # 2. Create User
@@ -220,7 +240,7 @@ USER jupyter
 WORKDIR /home/jupyter
 
 LABEL maintainer="mohamedharoon0" \
-      version="2.1" \
+      version="2.2" \
       description="GCP Workbench with R - Alpine Linux (Hardened)" \
       packages="plyr,anomalize,foreach,tidyverse,tibbletime,parallel,pbapply,dplyr"
 
