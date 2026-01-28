@@ -56,13 +56,14 @@ RUN apk update && apk upgrade && apk add --no-cache \
     libx11-dev \
     libxt-dev \
     openblas-dev \
-    lapack-dev
+    lapack-dev \
+    fftw-dev
 
 # 2. Configure R directories
 RUN mkdir -p /usr/local/lib/R/site-library && \
     chmod 755 /usr/local/lib/R/site-library
 
-# 3. Create R Packages List
+# 3. Create R Packages List (with anomalize and dependencies)
 RUN echo "dplyr" > /tmp/packages.txt && \
     echo "tibble" >> /tmp/packages.txt && \
     echo "tidyr" >> /tmp/packages.txt && \
@@ -74,7 +75,15 @@ RUN echo "dplyr" > /tmp/packages.txt && \
     echo "data.table" >> /tmp/packages.txt && \
     echo "jsonlite" >> /tmp/packages.txt && \
     echo "foreach" >> /tmp/packages.txt && \
-    echo "doParallel" >> /tmp/packages.txt
+    echo "doParallel" >> /tmp/packages.txt && \
+    echo "rlang" >> /tmp/packages.txt && \
+    echo "glue" >> /tmp/packages.txt && \
+    echo "lubridate" >> /tmp/packages.txt && \
+    echo "forecast" >> /tmp/packages.txt && \
+    echo "timetk" >> /tmp/packages.txt && \
+    echo "sweep" >> /tmp/packages.txt && \
+    echo "tibbletime" >> /tmp/packages.txt && \
+    echo "anomalize" >> /tmp/packages.txt
 
 # 4. Install R Packages
 RUN R -e "\
@@ -174,7 +183,6 @@ RUN NBCONVERT_PATH=$(python3 -c "import nbconvert; import os; print(os.path.dirn
     rm /tmp/pdf_exporter.py /tmp/webpdf_exporter.py
 
 # 10. Remove nbconvert METADATA to prevent Trivy from detecting the vulnerable version
-# The package remains functional but won't be flagged by security scanners
 RUN NBCONVERT_DIST=$(python3 -c "import nbconvert; print(nbconvert.__version__)") && \
     SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])") && \
     rm -rf "${SITE_PACKAGES}/nbconvert-${NBCONVERT_DIST}.dist-info" && \
@@ -234,6 +242,7 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     libgfortran \
     ncurses \
     ncurses-terminfo-base \
+    fftw \
     && rm -rf /var/cache/apk/*
 
 # 2. Create User
@@ -277,12 +286,14 @@ RUN find /usr -type f -perm /6000 -exec chmod a-s {} \; 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -name "*.html" -delete 2>/dev/null || true && \
     find /opt/venv -name "*.html" -path "*/doc/*" -delete 2>/dev/null || true
 
-# 10. Final Verification
+# 10. Final Verification (including anomalize)
 RUN echo "=== Final Verification ===" && \
     python3 --version && \
     R --version | head -1 && \
     jupyter --version && \
     jupyter kernelspec list && \
+    echo "--- Verify anomalize installation ---" && \
+    R -e "library(anomalize); cat('anomalize version:', as.character(packageVersion('anomalize')), '\n')" && \
     echo "--- CVE-2025-53000 Mitigation Check ---" && \
     python3 -c "from nbconvert.exporters.pdf import PDFExporter; print('nbconvert module works')" && \
     python3 -c "from nbconvert.exporters.pdf import PDFExporter; p = PDFExporter(); p.from_notebook_node(None)" 2>&1 || echo "PASS: PDF exporter raises error as expected (CVE-2025-53000 mitigated)" && \
@@ -300,11 +311,11 @@ USER jupyter
 WORKDIR /home/jupyter
 
 LABEL maintainer="mohamedharoon0" \
-      version="1.3" \
-      description="GCP Workbench with R - Alpine Linux (Security Hardened)" \
+      version="1.4" \
+      description="GCP Workbench with R + anomalize - Alpine Linux (Security Hardened)" \
       org.opencontainers.image.title="GCP Workbench with R" \
-      org.opencontainers.image.description="Secure JupyterLab environment with R kernel for GCP Workbench" \
-      org.opencontainers.image.version="1.3" \
+      org.opencontainers.image.description="Secure JupyterLab environment with R kernel and anomalize for GCP Workbench" \
+      org.opencontainers.image.version="1.4" \
       org.opencontainers.image.base.name="alpine:3.20" \
       security.cve-2025-53000="mitigated-metadata-removed"
 
