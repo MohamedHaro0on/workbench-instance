@@ -5,10 +5,26 @@
 
 set -e
 
-# Ensure directories exist
+# Ensure directories exist with correct permissions
 mkdir -p /home/jupyter/.jupyter
 mkdir -p /home/jupyter/.local/share/jupyter/runtime
+mkdir -p /home/jupyter/.local/share/jupyter/kernels
 mkdir -p /home/jupyter/work
+
+# Set up gcloud config directory
+mkdir -p /home/jupyter/.config/gcloud
+
+# Export environment
+export GOOGLE_CLOUD_PROJECT="${GOOGLE_CLOUD_PROJECT:-}"
+export CLOUDSDK_CONFIG="/home/jupyter/.config/gcloud"
+
+# Log startup
+echo "============================================"
+echo "Starting Jupyter Lab"
+echo "Python: $(python3 --version)"
+echo "R: $(R --version | head -1)"
+echo "gcloud: $(gcloud --version 2>/dev/null | head -1 || echo 'not installed')"
+echo "============================================"
 
 # Start Jupyter
 exec jupyter lab \
