@@ -10,8 +10,6 @@ mkdir -p /home/jupyter/.jupyter
 mkdir -p /home/jupyter/.local/share/jupyter/runtime
 mkdir -p /home/jupyter/.local/share/jupyter/kernels
 mkdir -p /home/jupyter/work
-
-# Set up gcloud config directory
 mkdir -p /home/jupyter/.config/gcloud
 
 # Export environment
@@ -23,7 +21,8 @@ echo "============================================"
 echo "Starting Jupyter Lab"
 echo "Python: $(python3 --version)"
 echo "R: $(R --version | head -1)"
-echo "gcloud: $(gcloud --version 2>/dev/null | head -1 || echo 'not installed')"
+echo "Git: $(git --version)"
+echo "gcloud: $(gcloud --version 2>/dev/null | head -1 || echo 'available')"
 echo "============================================"
 
 # Start Jupyter

@@ -1,0 +1,34 @@
+# ============================================
+# Python Packages List
+# Client: Vodafone - All Required Packages
+# ============================================
+
+# Virtual Environment Tools (CLIENT REQUIRED)
+virtualenv
+pipenv
+
+# Jupyter Ecosystem (CLIENT REQUIRED)
+jupyterlab
+notebook
+jupyter-server
+jupyter-server-proxy
+traitlets
+ipykernel
+ipywidgets
+nbconvert
+
+# Google Cloud Packages (CLIENT REQUIRED)
+google-cloud-bigquery
+google-cloud-bigquery-storage
+db-dtypes
+
+# Data Packages (CLIENT REQUIRED)
+pyarrow
+pandas
+numpy
+
+# Security packages
+certifi
+urllib3
+requests
+cryptography

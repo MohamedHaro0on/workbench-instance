@@ -1,53 +1,74 @@
 #!/bin/bash
 # ============================================
 # Python/Jupyter Installation Script
-# Includes all client-requested packages
+# BUILD TIME: Uses official PyPI
 # ============================================
 
 set -e
 
 echo "============================================"
-echo "Installing Python packages"
+echo "Installing Python packages (BUILD TIME)"
+echo "Using: https://pypi.org/simple/ (Official)"
 echo "============================================"
 
-# Upgrade pip and build tools to latest secure versions
-pip install --no-cache-dir --upgrade pip
-pip install --no-cache-dir --upgrade setuptools wheel
+# Explicitly use official PyPI for build
+export PIP_INDEX_URL=https://pypi.org/simple/
+export PIP_TRUSTED_HOST=pypi.org
 
-# Read packages from file if exists, otherwise use defaults
-PACKAGES_FILE="/tmp/packages/python-packages.txt"
+# Upgrade pip and build tools
+pip install --upgrade pip
+pip install --upgrade setuptools wheel
 
-if [ -f "$PACKAGES_FILE" ]; then
-    echo "Installing from packages file..."
-    # Filter comments and empty lines
-    grep -v '^#' "$PACKAGES_FILE" | grep -v '^$' | while read -r package; do
-        echo "Installing: $package"
-        pip install --no-cache-dir "$package" || echo "Warning: Failed to install $package"
-    done
-else
-    echo "Installing default packages..."
-    pip install --no-cache-dir \
-        jupyterlab \
-        notebook \
-        jupyter-server \
-        jupyter-server-proxy \
-        traitlets \
-        ipykernel \
-        ipywidgets \
-        nbconvert \
-        google-cloud-bigquery \
-        google-cloud-bigquery-storage \
-        db-dtypes \
-        pyarrow \
-        pandas \
-        numpy \
-        virtualenv \
-        pipenv
-fi
+# ============================================
+# CLIENT REQUIRED: virtualenv, pipenv
+# ============================================
+echo ">>> Installing virtualenv and pipenv..."
+pip install virtualenv pipenv
 
-# Fix vendored wheel vulnerability in setuptools (CVE mitigation)
-echo "Applying setuptools security fixes..."
-pip install --no-cache-dir --upgrade --force-reinstall setuptools
+# ============================================
+# CLIENT REQUIRED: Jupyter kernel tools
+# ============================================
+echo ">>> Installing Jupyter ecosystem..."
+pip install \
+    jupyterlab \
+    notebook \
+    jupyter-server \
+    jupyter-server-proxy \
+    traitlets \
+    ipykernel \
+    ipywidgets \
+    nbconvert
+
+# ============================================
+# CLIENT REQUIRED: Preinstalled Python packages
+# ============================================
+echo ">>> Installing Google Cloud packages..."
+pip install \
+    google-cloud-bigquery \
+    google-cloud-bigquery-storage \
+    db-dtypes
+
+echo ">>> Installing data packages..."
+pip install \
+    pyarrow \
+    pandas \
+    numpy
+
+# ============================================
+# Security: Upgrade critical packages
+# ============================================
+echo ">>> Upgrading security-critical packages..."
+pip install --upgrade \
+    certifi \
+    urllib3 \
+    requests \
+    cryptography
+
+# ============================================
+# Fix vendored wheel vulnerability
+# ============================================
+echo ">>> Applying setuptools security fixes..."
+pip install --upgrade --force-reinstall setuptools
 
 SETUPTOOLS_PATH=$(python3 -c "import setuptools; import os; print(os.path.dirname(setuptools.__file__))" 2>/dev/null || echo "")
 if [ -n "$SETUPTOOLS_PATH" ] && [ -d "${SETUPTOOLS_PATH}/_vendor" ]; then
@@ -55,14 +76,23 @@ if [ -n "$SETUPTOOLS_PATH" ] && [ -d "${SETUPTOOLS_PATH}/_vendor" ]; then
     echo "Removed vendored wheel from setuptools"
 fi
 
-# Upgrade security-critical packages to latest
-echo "Upgrading security-critical packages..."
-pip install --no-cache-dir --upgrade \
-    certifi \
-    urllib3 \
-    requests \
-    cryptography \
-    pyOpenSSL
+# ============================================
+# Verification
+# ============================================
+echo ""
+echo "============================================"
+echo "Verifying installed packages..."
+echo "============================================"
+
+python3 -c "import virtualenv; print('OK: virtualenv')"
+python3 -c "import pipenv; print('OK: pipenv')"
+python3 -c "import jupyterlab; print('OK: jupyterlab', jupyterlab.__version__)"
+python3 -c "import notebook; print('OK: notebook')"
+python3 -c "import google.cloud.bigquery; print('OK: google-cloud-bigquery')"
+python3 -c "import google.cloud.bigquery_storage; print('OK: google-cloud-bigquery-storage')"
+python3 -c "import db_dtypes; print('OK: db-dtypes')"
+python3 -c "import pyarrow; print('OK: pyarrow', pyarrow.__version__)"
+python3 -c "import pandas; print('OK: pandas', pandas.__version__)"
 
 echo "============================================"
 echo "Python packages installed successfully"
