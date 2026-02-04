@@ -1,15 +1,62 @@
 # ============================================
-# R Configuration
+# R Configuration for GCP Workbench
+# R Version: 4.1.0
 # ============================================
 
 # Set CRAN mirror
-options(repos = c(CRAN = "https://cloud.r-project.org"))
+local({
+  r <- getOption("repos")
+  r["CRAN"] <- "https://cloud.r-project.org"
+  options(repos = r)
+})
 
 # Set library paths
 .libPaths(c("/usr/local/lib/R/site-library", .libPaths()))
+
+# Ensure site-library exists
+if (!dir.exists("/usr/local/lib/R/site-library")) {
+  dir.create("/usr/local/lib/R/site-library", recursive = TRUE, showWarnings = FALSE)
+}
 
 # Disable GUI prompts
 options(menu.graphics = FALSE)
 
 # Set default number of CPUs for parallel operations
 options(Ncpus = parallel::detectCores())
+
+# Set timeout for downloads
+options(timeout = 300)
+
+# Disable bytecode compilation during install (faster installs)
+options(install.packages.compile.from.source = "always")
+
+# HTTPUserAgent for CRAN downloads (helps with some mirrors)
+options(HTTPUserAgent = sprintf(
+  "R/%s R (%s)",
+  getRversion(),
+  paste(getRversion(), R.version$platform, R.version$arch, R.version$os)
+))
+
+# Warn on partial argument matching
+options(warnPartialMatchAttr = TRUE)
+options(warnPartialMatchDollar = TRUE)
+
+# Set default stringsAsFactors (R 4.1.0 default is FALSE)
+options(stringsAsFactors = FALSE)
+
+# Memory settings
+options(expressions = 500000)
+
+# Print startup message
+if (interactive()) {
+  cat("\n")
+  cat("============================================\n")
+  cat("  GCP Workbench - R Environment\n")
+  cat("============================================\n")
+  cat("  R Version:", as.character(getRversion()), "\n")
+  cat("  Library Path:", .libPaths()[1], "\n")
+  cat("  CRAN Mirror:", getOption("repos")["CRAN"], "\n")
+  cat("  CPUs:", getOption("Ncpus"), "\n")
+  cat("============================================\n")
+  cat("\n")
+}

@@ -1,10 +1,12 @@
 #!/usr/bin/env Rscript
 # ============================================
-# R Package Installation Script for Alpine
-# Client: Vodafone - All requested packages
+# R Package Installation Script
+# Reads from: /tmp/packages/r-packages.txt
+# R Version: 4.1.0
 # ============================================
 
 lib_path <- "/usr/local/lib/R/site-library"
+pkg_file <- "/tmp/packages/r-packages.txt"
 ncpus <- parallel::detectCores()
 
 options(
@@ -15,25 +17,134 @@ options(
 )
 
 cat("============================================\n")
-cat("Installing R Packages\n")
+cat("R Package Installation\n")
+cat("============================================\n")
+cat("R Version:", as.character(getRversion()), "\n")
 cat("Library:", lib_path, "\n")
 cat("CPUs:", ncpus, "\n")
+cat("Package File:", pkg_file, "\n")
 cat("============================================\n\n")
 
 # Ensure library path exists
 if (!dir.exists(lib_path)) {
   dir.create(lib_path, recursive = TRUE)
 }
+.libPaths(lib_path)
 
-install_pkg <- function(pkg, from_url = NULL, retries = 3) {
-  cat(">>> Installing:", pkg, "\n")
+# ============================================
+# Define Base R Packages (skip these)
+# ============================================
+base_r_packages <- c(
+  "base", "compiler", "datasets", "graphics", "grDevices", "grid",
+  "methods", "parallel", "splines", "stats", "stats4", "tcltk",
+  "tools", "translations", "utils",
+  "boot", "class", "cluster", "codetools", "foreign", "KernSmooth",
+  "lattice", "MASS", "Matrix", "mgcv", "nlme", "nnet", "rpart",
+  "spatial", "survival"
+)
+
+# ============================================
+# Define Archived Packages
+# ============================================
+archived_packages <- list(
+  "tibbletime" = "https://cran.r-project.org/src/contrib/Archive/tibbletime/tibbletime_0.1.8.tar.gz",
+  "sweep" = "https://cran.r-project.org/src/contrib/Archive/sweep/sweep_0.2.5.tar.gz"
+)
+
+# ============================================
+# Read and Parse r-packages.txt
+# ============================================
+cat("=== Reading Package List ===\n")
+
+if (!file.exists(pkg_file)) {
+  stop("ERROR: Package file not found: ", pkg_file)
+}
+
+lines <- readLines(pkg_file, warn = FALSE)
+lines <- trimws(lines)
+lines <- lines[lines != "" & !grepl("^#", lines)]
+
+packages <- data.frame(
+  name = character(),
+  version = character(),
+  stringsAsFactors = FALSE
+)
+
+for (line in lines) {
+  if (grepl("==", line)) {
+    parts <- strsplit(line, "==")[[1]]
+    pkg_name <- trimws(parts[1])
+    pkg_version <- trimws(parts[2])
+  } else {
+    pkg_name <- trimws(line)
+    pkg_version <- ""
+  }
+  
+  # Skip base R packages
+  if (!pkg_name %in% base_r_packages) {
+    packages <- rbind(packages, data.frame(
+      name = pkg_name,
+      version = pkg_version,
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+cat("Found", nrow(packages), "packages to install\n\n")
+
+# ============================================
+# Installation Function
+# ============================================
+install_pkg <- function(pkg, version = NULL, retries = 3) {
+  # Check if already installed
+  if (requireNamespace(pkg, quietly = TRUE)) {
+    installed_ver <- as.character(packageVersion(pkg))
+    if (is.null(version) || version == "" || installed_ver == version) {
+      cat("  SKIP:", pkg, installed_ver, "(already installed)\n")
+      return(TRUE)
+    }
+  }
+  
+  cat(">>> Installing:", pkg)
+  if (!is.null(version) && version != "") {
+    cat(" (version", version, ")")
+  }
+  cat("\n")
   
   for (attempt in 1:retries) {
     result <- tryCatch({
-      if (!is.null(from_url)) {
-        install.packages(from_url, repos = NULL, type = "source", lib = lib_path)
-      } else if (!requireNamespace(pkg, quietly = TRUE)) {
-        install.packages(pkg, lib = lib_path, dependencies = TRUE, Ncpus = ncpus)
+      # Check if archived package
+      if (pkg %in% names(archived_packages)) {
+        cat("    Installing from archive...\n")
+        install.packages(
+          archived_packages[[pkg]],
+          repos = NULL,
+          type = "source",
+          lib = lib_path,
+          Ncpus = ncpus
+        )
+      } else if (!is.null(version) && version != "") {
+        # Install specific version
+        if (!requireNamespace("remotes", quietly = TRUE)) {
+          install.packages("remotes", lib = lib_path, quiet = TRUE)
+        }
+        remotes::install_version(
+          pkg,
+          version = version,
+          lib = lib_path,
+          upgrade = "never",
+          quiet = FALSE,
+          dependencies = TRUE,
+          Ncpus = ncpus
+        )
+      } else {
+        # Install latest version
+        install.packages(
+          pkg,
+          lib = lib_path,
+          dependencies = TRUE,
+          Ncpus = ncpus
+        )
       }
       
       if (requireNamespace(pkg, quietly = TRUE)) {
@@ -43,135 +154,208 @@ install_pkg <- function(pkg, from_url = NULL, retries = 3) {
       return(FALSE)
     }, error = function(e) {
       cat("    Attempt", attempt, "failed:", conditionMessage(e), "\n")
-      if (attempt < retries) {
-        Sys.sleep(2)
-      }
+      if (attempt < retries) Sys.sleep(2)
       return(FALSE)
     })
     
     if (result) return(TRUE)
   }
   
-  cat("    FAILED after", retries, "attempts:", pkg, "\n")
+  # Fallback: try latest if specific version failed
+  if (!is.null(version) && version != "") {
+    cat("    Trying latest version as fallback...\n")
+    tryCatch({
+      install.packages(pkg, lib = lib_path, dependencies = TRUE, Ncpus = ncpus)
+      if (requireNamespace(pkg, quietly = TRUE)) {
+        cat("    OK (fallback):", pkg, as.character(packageVersion(pkg)), "\n")
+        return(TRUE)
+      }
+    }, error = function(e) {
+      cat("    Fallback failed\n")
+    })
+  }
+  
+  cat("    FAILED:", pkg, "\n")
   return(FALSE)
 }
 
-# Phase 1: Core dependencies (order matters)
-cat("\n=== Phase 1: Core Dependencies ===\n")
-core_pkgs <- c("rlang", "cli", "glue", "vctrs", "lifecycle", "pillar", "Rcpp", "R6", "magrittr")
-for (p in core_pkgs) install_pkg(p)
+# ============================================
+# Priority Installation Order
+# ============================================
+priority_order <- c(
+  "remotes",
+  "rlang", "cli", "glue", "lifecycle", "vctrs", "pillar",
+  "R6", "Rcpp", "magrittr", "ellipsis", "fansi", "utf8",
+  "pkgconfig", "digest", "crayon", "withr", "ps", "processx", "callr",
+  "BH", "cpp11", "RcppArmadillo", "RcppRoll",
+  "sys", "askpass", "openssl", "curl", "jsonlite", "mime", "httr",
+  "stringi", "stringr",
+  "tibble", "tidyselect", "dplyr", "tidyr", "purrr", "generics", "broom",
+  "bit", "bit64", "blob", "DBI", "vroom", "readr", "readxl", "haven",
+  "data.table", "dtplyr", "cellranger", "dbplyr",
+  "lubridate", "hms", "tzdb", "anytime", "timeDate",
+  "colorspace", "farver", "labeling", "munsell", "RColorBrewer",
+  "viridisLite", "scales", "isoband", "gtable", "ggplot2",
+  "base64enc", "htmltools", "jquerylib", "sass", "bslib",
+  "htmlwidgets", "crosstalk", "plotly", "later", "promises",
+  "yaml", "xfun", "highr", "evaluate", "knitr", "rmarkdown", "tinytex",
+  "globals", "listenv", "parallelly", "future", "future.apply", "furrr",
+  "foreach", "iterators", "doParallel", "pbapply", "progressr",
+  "quadprog", "numDeriv", "SQUAREM", "lmtest", "lava", "prodlim",
+  "ipred", "gower", "hardhat", "recipes", "rsample",
+  "zoo", "xts", "TTR", "quantmod", "fracdiff", "forecast", "urca", "tseries", "tsfeatures",
+  "forcats", "modelr", "reprex", "rvest", "selectr", "xml2",
+  "gargle", "googledrive", "googlesheets4",
+  "assertthat", "backports", "cachem", "fastmap", "memoise", "rappdirs",
+  "clipr", "fs", "lazyeval", "rematch", "rematch2", "ids", "uuid",
+  "plyr",
+  "warp", "slider", "padr", "timetk",
+  "tibbletime", "sweep",
+  "anomalize",
+  "tidyverse",
+  "rstudioapi",
+  "repr", "IRdisplay", "pbdZMQ",
+  "IRkernel"
+)
 
-# Phase 2: Data manipulation
-cat("\n=== Phase 2: Data Packages ===\n")
-data_pkgs <- c("tibble", "dplyr", "tidyr", "purrr", "readr", "stringr", "forcats", "plyr", "data.table")
-for (p in data_pkgs) install_pkg(p)
+# ============================================
+# Phase 1: Install remotes
+# ============================================
+cat("\n=== Phase 1: Installing remotes ===\n")
+install.packages("remotes", lib = lib_path, quiet = TRUE)
 
-# Phase 3: Visualization
-cat("\n=== Phase 3: Visualization ===\n")
-install_pkg("ggplot2")
+# ============================================
+# Phase 2: Install in Priority Order
+# ============================================
+cat("\n=== Phase 2: Installing Packages ===\n")
 
-# Phase 4: Utilities
-cat("\n=== Phase 4: Utilities ===\n")
-util_pkgs <- c("jsonlite", "lubridate", "hms", "withr", "crayon")
-for (p in util_pkgs) install_pkg(p)
+installed_ok <- character()
+installed_fail <- character()
 
-# Phase 5: Parallel processing
-cat("\n=== Phase 5: Parallel Processing ===\n")
-parallel_pkgs <- c("foreach", "iterators", "doParallel", "pbapply")
-for (p in parallel_pkgs) install_pkg(p)
-
-# Phase 6: Time series
-cat("\n=== Phase 6: Time Series ===\n")
-ts_pkgs <- c("zoo", "xts", "tseries", "TTR", "quantmod", "forecast")
-for (p in ts_pkgs) install_pkg(p)
-
-# Phase 7: timetk
-cat("\n=== Phase 7: timetk ===\n")
-for (p in c("timeDate", "timetk")) install_pkg(p)
-
-# Phase 8: sweep (may be archived)
-cat("\n=== Phase 8: sweep ===\n")
-if (!install_pkg("sweep")) {
-  install_pkg("sweep", from_url = "https://cran.r-project.org/src/contrib/Archive/sweep/sweep_0.2.5.tar.gz")
+# Install priority packages first
+for (pkg in priority_order) {
+  idx <- which(packages$name == pkg)
+  if (length(idx) > 0) {
+    version <- packages$version[idx[1]]
+    if (install_pkg(pkg, if(version == "") NULL else version)) {
+      installed_ok <- c(installed_ok, pkg)
+    } else {
+      installed_fail <- c(installed_fail, pkg)
+    }
+  }
 }
 
-# Phase 9: tibbletime (ARCHIVED on CRAN)
-cat("\n=== Phase 9: tibbletime (ARCHIVED) ===\n")
-install_pkg("tibbletime", from_url = "https://cran.r-project.org/src/contrib/Archive/tibbletime/tibbletime_0.1.8.tar.gz")
+# Install remaining packages
+remaining <- packages$name[!packages$name %in% c(installed_ok, installed_fail)]
+cat("\n=== Phase 3: Installing Remaining (", length(remaining), ") ===\n")
 
-# Phase 10: tidyverse meta-package
-cat("\n=== Phase 10: tidyverse ===\n")
-tryCatch({
-  install_pkg("tidyverse")
-}, error = function(e) {
-  cat("    tidyverse meta-package failed, individual packages should work\n")
-})
+for (pkg in remaining) {
+  idx <- which(packages$name == pkg)
+  version <- packages$version[idx[1]]
+  if (install_pkg(pkg, if(version == "") NULL else version)) {
+    installed_ok <- c(installed_ok, pkg)
+  } else {
+    installed_fail <- c(installed_fail, pkg)
+  }
+}
 
-# Phase 11: anomalize (depends on tibbletime)
-cat("\n=== Phase 11: anomalize ===\n")
-for (p in c("assertthat", "ggfortify")) install_pkg(p)
-install_pkg("anomalize")
-
-# Phase 12: IRkernel dependencies
-cat("\n=== Phase 12: IRkernel Dependencies ===\n")
-irkernel_deps <- c("repr", "IRdisplay", "evaluate", "digest", "uuid")
-for (p in irkernel_deps) install_pkg(p)
-
-# Phase 13: pbdZMQ (requires special config for ZeroMQ)
-cat("\n=== Phase 13: pbdZMQ ===\n")
-tryCatch({
-  Sys.setenv(ZMQ_INCLUDE = "/usr/include", ZMQ_LIB = "/usr/lib")
-  install.packages("pbdZMQ", lib = lib_path, 
-    configure.args = "--with-zmq-include=/usr/include --with-zmq-lib=/usr/lib",
-    Ncpus = ncpus)
-  cat("    OK: pbdZMQ\n")
-}, error = function(e) {
-  cat("    pbdZMQ error:", conditionMessage(e), "\n")
-})
-
-# Phase 14: IRkernel
-cat("\n=== Phase 14: IRkernel ===\n")
-install_pkg("IRkernel")
+# ============================================
+# Phase 4: Special pbdZMQ Installation
+# ============================================
+if ("pbdZMQ" %in% packages$name && !"pbdZMQ" %in% installed_ok) {
+  cat("\n=== Phase 4: Special pbdZMQ ===\n")
+  tryCatch({
+    Sys.setenv(ZMQ_INCLUDE = "/usr/include", ZMQ_LIB = "/usr/lib")
+    install.packages("pbdZMQ", lib = lib_path,
+      configure.args = "--with-zmq-include=/usr/include --with-zmq-lib=/usr/lib",
+      Ncpus = ncpus)
+    if (requireNamespace("pbdZMQ", quietly = TRUE)) {
+      cat("    OK: pbdZMQ\n")
+      installed_ok <- c(installed_ok, "pbdZMQ")
+      installed_fail <- installed_fail[installed_fail != "pbdZMQ"]
+    }
+  }, error = function(e) {
+    cat("    pbdZMQ failed:", conditionMessage(e), "\n")
+  })
+}
 
 # ============================================
 # Verification
 # ============================================
 cat("\n============================================\n")
-cat("VERIFICATION - CLIENT REQUESTED PACKAGES\n")
-cat("============================================\n")
+cat("VERIFICATION\n")
+cat("============================================\n\n")
 
-client_pkgs <- c(
-  "plyr", "anomalize", "foreach", "tidyverse", 
-  "tibbletime", "doParallel", "pbapply", "dplyr", "IRkernel"
-)
+# Verify all packages
+all_ok <- 0
+all_fail <- 0
 
-results <- data.frame(
-  Package = character(),
-  Status = character(),
-  Version = character(),
-  stringsAsFactors = FALSE
-)
-
-all_ok <- TRUE
-for (p in client_pkgs) {
-  if (requireNamespace(p, quietly = TRUE)) {
-    ver <- as.character(packageVersion(p))
-    cat("OK:", p, ver, "\n")
-    results <- rbind(results, data.frame(Package = p, Status = "OK", Version = ver))
+for (i in 1:nrow(packages)) {
+  pkg <- packages$name[i]
+  req_ver <- packages$version[i]
+  
+  if (requireNamespace(pkg, quietly = TRUE)) {
+    inst_ver <- as.character(packageVersion(pkg))
+    cat("  OK:", pkg, inst_ver)
+    if (req_ver != "" && inst_ver != req_ver) {
+      cat(" (requested:", req_ver, ")")
+    }
+    cat("\n")
+    all_ok <- all_ok + 1
   } else {
-    cat("MISSING:", p, "\n")
-    results <- rbind(results, data.frame(Package = p, Status = "MISSING", Version = ""))
-    all_ok <- FALSE
+    cat("  MISSING:", pkg, "\n")
+    all_fail <- all_fail + 1
   }
 }
 
-cat("\n")
-if (!all_ok) {
-  cat("WARNING: Some packages are missing!\n")
-  # Don't fail the build - individual packages still work
-  # quit(status = 1)
+# ============================================
+# Key Package Verification
+# ============================================
+cat("\n=== Key Packages ===\n")
+key_pkgs <- c("rstudioapi", "dplyr", "ggplot2", "tidyverse", "forecast", 
+              "anomalize", "tibbletime", "timetk", "IRkernel")
+
+for (pkg in key_pkgs) {
+  if (requireNamespace(pkg, quietly = TRUE)) {
+    cat("  OK:", pkg, as.character(packageVersion(pkg)), "\n")
+  } else {
+    cat("  MISSING:", pkg, "\n")
+  }
+}
+
+# Verify rstudioapi version specifically
+cat("\n=== rstudioapi Verification ===\n")
+if (requireNamespace("rstudioapi", quietly = TRUE)) {
+  ver <- as.character(packageVersion("rstudioapi"))
+  cat("  rstudioapi version:", ver, "\n")
+  if (ver == "0.14") {
+    cat("  STATUS: OK - Matches requested version 0.14\n")
+  } else {
+    cat("  STATUS: WARNING - Requested 0.14, got", ver, "\n")
+  }
+} else {
+  cat("  STATUS: ERROR - rstudioapi not installed!\n")
+}
+
+# ============================================
+# Summary
+# ============================================
+cat("\n============================================\n")
+cat("SUMMARY\n")
+cat("============================================\n")
+cat("Total requested:", nrow(packages), "\n")
+cat("Installed:", all_ok, "\n")
+cat("Failed:", all_fail, "\n")
+cat("Success rate:", round(all_ok/nrow(packages) * 100, 1), "%\n")
+
+if (all_fail > 0) {
+  cat("\nFailed packages:\n")
+  for (pkg in installed_fail) {
+    cat("  -", pkg, "\n")
+  }
 }
 
 cat("\n============================================\n")
 cat("R Package Installation Complete!\n")
+cat("R Version:", as.character(getRversion()), "\n")
 cat("============================================\n")
