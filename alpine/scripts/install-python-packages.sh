@@ -17,9 +17,9 @@ export PIP_INDEX_URL=https://pypi.org/simple/
 export PIP_TRUSTED_HOST=pypi.org
 
 # ============================================
-# SECURITY FIX: Upgrade pip to 26.0+ (CVE-2026-1703)
+# SECURITY FIX: Upgrade pip FIRST (CVE-2025-8869, CVE-2026-1703)
 # ============================================
-echo ">>> SECURITY: Upgrading pip to fix CVE-2026-1703..."
+echo ">>> SECURITY: Upgrading pip to fix CVE-2025-8869 and CVE-2026-1703..."
 pip install --upgrade "pip>=26.0"
 
 # Verify pip version
@@ -27,21 +27,28 @@ PIP_VERSION=$(pip --version | awk '{print $2}')
 echo ">>> pip version: ${PIP_VERSION}"
 
 # ============================================
-# SECURITY FIX: Upgrade setuptools to 78.1.1+ (CVE-2025-47273)
+# SECURITY FIX: Upgrade setuptools (CVE-2024-6345, CVE-2025-47273)
 # ============================================
-echo ">>> SECURITY: Upgrading setuptools to fix CVE-2025-47273..."
+echo ">>> SECURITY: Upgrading setuptools to fix CVE-2024-6345 and CVE-2025-47273..."
 pip install --upgrade "setuptools>=78.1.1"
 
 # ============================================
-# SECURITY FIX: Upgrade wheel to 0.46.2+ (CVE-2026-24049)
+# SECURITY FIX: Upgrade wheel (CVE-2026-24049)
 # ============================================
 echo ">>> SECURITY: Upgrading wheel to fix CVE-2026-24049..."
 pip install --upgrade "wheel>=0.46.2"
+
+# ============================================
+# SECURITY FIX: Upgrade cryptography (GHSA-h4gh-qq45-vh27, CVE-2024-12797)
+# ============================================
+echo ">>> SECURITY: Upgrading cryptography..."
+pip install --upgrade "cryptography>=44.0.1"
 
 # Verify versions
 echo ">>> Verifying security package versions..."
 pip show setuptools | grep -E "^(Name|Version):"
 pip show wheel | grep -E "^(Name|Version):"
+pip show cryptography | grep -E "^(Name|Version):"
 
 # ============================================
 # CLIENT REQUIRED: virtualenv, pipenv
@@ -84,17 +91,16 @@ pip install \
 echo ">>> Upgrading security-critical packages..."
 pip install --upgrade \
     certifi \
-    urllib3 \
-    requests \
-    cryptography
+    "urllib3>=2.0" \
+    "requests>=2.31"
 
 # ============================================
-# SECURITY: Final verification and cleanup
+# SECURITY: Final verification and re-upgrade
 # ============================================
 echo ">>> Final security verification..."
 
-# Ensure pip, setuptools, wheel are at secure versions
-pip install --upgrade "pip>=26.0" "setuptools>=78.1.1" "wheel>=0.46.2"
+# Ensure all security packages are at secure versions (run again to be sure)
+pip install --upgrade "pip>=26.0" "setuptools>=78.1.1" "wheel>=0.46.2" "cryptography>=44.0.1"
 
 # Remove vendored wheel from setuptools (additional security measure)
 echo ">>> Applying setuptools security fixes..."
@@ -116,6 +122,7 @@ echo "=== SECURITY PACKAGE VERSIONS ==="
 pip --version
 pip show setuptools | grep -E "^Version:"
 pip show wheel | grep -E "^Version:"
+pip show cryptography | grep -E "^Version:"
 
 echo ""
 echo "=== FUNCTIONAL PACKAGES ==="
