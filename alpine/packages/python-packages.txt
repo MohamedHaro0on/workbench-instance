@@ -1,13 +1,30 @@
 # ============================================
 # Python Packages List
 # Client: Vodafone - All Required Packages
+# SECURITY: Minimum versions specified for CVE fixes
 # ============================================
 
+# ============================================
+# SECURITY: Core packages with minimum versions
+# ============================================
+# CVE-2026-1703: pip >= 26.0
+pip>=26.0
+
+# CVE-2025-47273: setuptools >= 78.1.1
+setuptools>=78.1.1
+
+# CVE-2026-24049: wheel >= 0.46.2
+wheel>=0.46.2
+
+# ============================================
 # Virtual Environment Tools (CLIENT REQUIRED)
+# ============================================
 virtualenv
 pipenv
 
+# ============================================
 # Jupyter Ecosystem (CLIENT REQUIRED)
+# ============================================
 jupyterlab
 notebook
 jupyter-server
@@ -17,18 +34,24 @@ ipykernel
 ipywidgets
 nbconvert
 
+# ============================================
 # Google Cloud Packages (CLIENT REQUIRED)
+# ============================================
 google-cloud-bigquery
 google-cloud-bigquery-storage
 db-dtypes
 
+# ============================================
 # Data Packages (CLIENT REQUIRED)
+# ============================================
 pyarrow
 pandas
 numpy
 
-# Security packages
+# ============================================
+# Security packages (latest versions)
+# ============================================
 certifi
-urllib3
-requests
-cryptography
+urllib3>=2.0
+requests>=2.31
+cryptography>=41.0

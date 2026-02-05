@@ -8,10 +8,11 @@
 # BUILD TIME:  Uses official PyPI
 # RUNTIME:     Uses Vodafone GCP Python Registry
 # 
-# Version: 4.8 - R 4.1.0 + Zero Vulnerabilities
+# Version: 4.9 - R 4.1.0 + Zero Vulnerabilities
 # ============================================
 
-ARG ALPINE_VERSION=3.18
+# Use Alpine 3.21 which has fixed libexpat and sqlite
+ARG ALPINE_VERSION=3.21
 ARG GCLOUD_VERSION=485.0.0
 ARG R_VERSION=4.1.0
 
@@ -26,7 +27,8 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
 # Install build dependencies for R
-RUN apk update && apk add --no-cache \
+# Note: Alpine 3.21 has patched versions of libexpat and sqlite
+RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     build-base \
     gfortran \
     linux-headers \
@@ -55,10 +57,16 @@ RUN apk update && apk add --no-cache \
     libxml2-dev \
     libx11-dev \
     libxt-dev \
+    # Explicitly install latest patched versions
+    expat-dev \
+    sqlite-dev \
     && rm -rf /var/cache/apk/*
 
-# Check libcurl version
-RUN echo "=== libcurl version ===" && curl --version | head -1
+# Verify patched versions
+RUN echo "=== Verifying Security Patches ===" && \
+    apk info expat | head -2 && \
+    apk info sqlite | head -2 && \
+    echo "=== libcurl version ===" && curl --version | head -1
 
 # Download R source
 RUN cd /tmp && \
@@ -67,7 +75,6 @@ RUN cd /tmp && \
     tar -xzf R-${R_VERSION}.tar.gz
 
 # Patch configure script to accept libcurl 8.x
-# Only change the cached variable, don't delete any lines
 RUN cd /tmp/R-${R_VERSION} && \
     echo "=== Patching configure for libcurl 8.x support ===" && \
     cp configure configure.orig && \
@@ -130,7 +137,7 @@ ENV LANG=C.UTF-8 \
     PIP_INDEX_URL=https://pypi.org/simple/ \
     PIP_TRUSTED_HOST=pypi.org
 
-# Install ALL Build Dependencies
+# Install ALL Build Dependencies with security patches
 RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     build-base \
     gfortran \
@@ -192,7 +199,17 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     util-linux-dev \
     libuuid \
     libffi-dev \
+    # Security: Explicitly install patched packages
+    expat \
+    expat-dev \
+    sqlite \
+    sqlite-dev \
     && rm -rf /var/cache/apk/*
+
+# Verify security patches are applied
+RUN echo "=== Security Patch Verification ===" && \
+    echo "expat version:" && apk info expat 2>/dev/null | head -1 && \
+    echo "sqlite version:" && apk info sqlite 2>/dev/null | head -1
 
 # Copy R from r-builder stage
 COPY --from=r-builder /opt/R /opt/R
@@ -249,7 +266,7 @@ RUN echo "=== Cleaning R packages security issues ===" && \
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python Packages
+# Install Python Packages with security fixes
 RUN /tmp/scripts/install-python-packages.sh
 
 # Install Google Cloud SDK
@@ -287,7 +304,11 @@ RUN find /usr/local/lib/R/site-library -name "*.html" -delete 2>/dev/null || tru
 # Final Verification
 RUN echo "=== FINAL BUILD VERIFICATION ===" && \
     R --version | head -1 && \
-    R --slave -e "cat('rstudioapi:', as.character(packageVersion('rstudioapi')), '\n')"
+    R --slave -e "cat('rstudioapi:', as.character(packageVersion('rstudioapi')), '\n')" && \
+    echo "=== Python Package Versions ===" && \
+    /opt/venv/bin/pip --version && \
+    /opt/venv/bin/pip show setuptools | grep Version && \
+    /opt/venv/bin/pip show wheel | grep Version
 
 
 # ============================================
@@ -315,7 +336,7 @@ ENV LANG=C.UTF-8 \
     PIP_EXTRA_INDEX_URL=https://pypi.org/simple/ \
     PIP_CONFIG_FILE=/etc/pip.conf
 
-# Install Runtime Dependencies
+# Install Runtime Dependencies with security patches
 RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     bash \
     coreutils \
@@ -360,7 +381,15 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     ncurses-terminfo-base \
     fftw \
     libuuid \
+    # Security: Explicitly include patched packages
+    expat \
+    sqlite-libs \
     && rm -rf /var/cache/apk/*
+
+# Verify security patches in runtime
+RUN echo "=== Runtime Security Verification ===" && \
+    apk info expat 2>/dev/null | head -1 && \
+    apk info sqlite-libs 2>/dev/null | head -1
 
 # Copy config files
 COPY config/pip.conf /etc/pip.conf
@@ -436,6 +465,9 @@ RUN echo "============================================" && \
     echo "R: $(R --version | head -1)" && \
     echo "Python: $(python3 --version)" && \
     echo "rstudioapi: $(R --slave -e "cat(as.character(packageVersion('rstudioapi')))")" && \
+    echo "pip: $(/opt/venv/bin/pip --version)" && \
+    echo "setuptools: $(/opt/venv/bin/pip show setuptools 2>/dev/null | grep Version)" && \
+    echo "wheel: $(/opt/venv/bin/pip show wheel 2>/dev/null | grep Version)" && \
     jupyter kernelspec list && \
     echo "============================================"
 
@@ -450,10 +482,11 @@ USER jupyter
 WORKDIR /home/jupyter
 
 LABEL maintainer="mohamedharoon0" \
-      version="4.8" \
-      description="GCP Workbench - R 4.1.0, rstudioapi 0.14, Alpine" \
+      version="4.9" \
+      description="GCP Workbench - R 4.1.0, rstudioapi 0.14, Alpine - Security Patched" \
       r.version="4.1.0" \
-      rstudioapi.version="0.14"
+      rstudioapi.version="0.14" \
+      security.patched="true"
 
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["/usr/local/bin/start-jupyter.sh"]
