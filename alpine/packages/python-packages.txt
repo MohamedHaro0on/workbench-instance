@@ -6,6 +6,7 @@
 
 # ============================================
 # SECURITY: Core packages with minimum versions
+# These MUST be installed/upgraded FIRST
 # ============================================
 # CVE-2025-8869, CVE-2026-1703: pip >= 26.0
 pip>=26.0
@@ -18,6 +19,13 @@ wheel>=0.46.2
 
 # GHSA-h4gh-qq45-vh27, CVE-2024-12797: cryptography >= 44.0.1
 cryptography>=44.0.1
+
+# ============================================
+# Security packages (install early)
+# ============================================
+certifi
+urllib3>=2.0
+requests>=2.32.0
 
 # ============================================
 # Virtual Environment Tools (CLIENT REQUIRED)
@@ -50,10 +58,3 @@ db-dtypes
 pyarrow
 pandas
 numpy
-
-# ============================================
-# Security packages (latest versions)
-# ============================================
-certifi
-urllib3>=2.0
-requests>=2.31
