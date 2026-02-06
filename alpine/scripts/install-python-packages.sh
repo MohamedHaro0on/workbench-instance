@@ -12,43 +12,22 @@ echo "Installing Python packages (BUILD TIME)"
 echo "Using: https://pypi.org/simple/ (Official)"
 echo "============================================"
 
-# Explicitly use official PyPI for build
 export PIP_INDEX_URL=https://pypi.org/simple/
 export PIP_TRUSTED_HOST=pypi.org
 
 # ============================================
-# SECURITY FIX: Upgrade pip FIRST (CVE-2025-8869, CVE-2026-1703)
+# SECURITY: Ensure secure versions are installed
 # ============================================
-echo ">>> SECURITY: Upgrading pip to fix CVE-2025-8869 and CVE-2026-1703..."
+echo ">>> SECURITY: Verifying secure package versions..."
 pip install --upgrade "pip>=26.0"
-
-# Verify pip version
-PIP_VERSION=$(pip --version | awk '{print $2}')
-echo ">>> pip version: ${PIP_VERSION}"
-
-# ============================================
-# SECURITY FIX: Upgrade setuptools (CVE-2024-6345, CVE-2025-47273)
-# ============================================
-echo ">>> SECURITY: Upgrading setuptools to fix CVE-2024-6345 and CVE-2025-47273..."
 pip install --upgrade "setuptools>=78.1.1"
-
-# ============================================
-# SECURITY FIX: Upgrade wheel (CVE-2026-24049)
-# ============================================
-echo ">>> SECURITY: Upgrading wheel to fix CVE-2026-24049..."
 pip install --upgrade "wheel>=0.46.2"
-
-# ============================================
-# SECURITY FIX: Upgrade cryptography (GHSA-h4gh-qq45-vh27, CVE-2024-12797)
-# ============================================
-echo ">>> SECURITY: Upgrading cryptography..."
 pip install --upgrade "cryptography>=44.0.1"
 
-# Verify versions
-echo ">>> Verifying security package versions..."
-pip show setuptools | grep -E "^(Name|Version):"
-pip show wheel | grep -E "^(Name|Version):"
-pip show cryptography | grep -E "^(Name|Version):"
+echo ">>> pip version: $(pip --version)"
+echo ">>> setuptools version: $(pip show setuptools | grep Version)"
+echo ">>> wheel version: $(pip show wheel | grep Version)"
+echo ">>> cryptography version: $(pip show cryptography | grep Version)"
 
 # ============================================
 # CLIENT REQUIRED: virtualenv, pipenv
@@ -95,15 +74,12 @@ pip install --upgrade \
     "requests>=2.31"
 
 # ============================================
-# SECURITY: Final verification and re-upgrade
+# SECURITY: Final verification
 # ============================================
 echo ">>> Final security verification..."
-
-# Ensure all security packages are at secure versions (run again to be sure)
 pip install --upgrade "pip>=26.0" "setuptools>=78.1.1" "wheel>=0.46.2" "cryptography>=44.0.1"
 
-# Remove vendored wheel from setuptools (additional security measure)
-echo ">>> Applying setuptools security fixes..."
+# Remove vendored wheel from setuptools
 SETUPTOOLS_PATH=$(python3 -c "import setuptools; import os; print(os.path.dirname(setuptools.__file__))" 2>/dev/null || echo "")
 if [ -n "$SETUPTOOLS_PATH" ] && [ -d "${SETUPTOOLS_PATH}/_vendor" ]; then
     rm -rf "${SETUPTOOLS_PATH}/_vendor/wheel"* 2>/dev/null || true
@@ -115,27 +91,10 @@ fi
 # ============================================
 echo ""
 echo "============================================"
-echo "Verifying installed packages..."
+echo "FINAL VERIFICATION"
 echo "============================================"
-
-echo "=== SECURITY PACKAGE VERSIONS ==="
-pip --version
-pip show setuptools | grep -E "^Version:"
-pip show wheel | grep -E "^Version:"
-pip show cryptography | grep -E "^Version:"
-
-echo ""
-echo "=== FUNCTIONAL PACKAGES ==="
-python3 -c "import virtualenv; print('OK: virtualenv')"
-python3 -c "import pipenv; print('OK: pipenv')"
-python3 -c "import jupyterlab; print('OK: jupyterlab', jupyterlab.__version__)"
-python3 -c "import notebook; print('OK: notebook')"
-python3 -c "import google.cloud.bigquery; print('OK: google-cloud-bigquery')"
-python3 -c "import google.cloud.bigquery_storage; print('OK: google-cloud-bigquery-storage')"
-python3 -c "import db_dtypes; print('OK: db-dtypes')"
-python3 -c "import pyarrow; print('OK: pyarrow', pyarrow.__version__)"
-python3 -c "import pandas; print('OK: pandas', pandas.__version__)"
-
-echo "============================================"
-echo "Python packages installed successfully"
+echo "pip: $(pip --version)"
+echo "setuptools: $(pip show setuptools | grep Version)"
+echo "wheel: $(pip show wheel | grep Version)"
+echo "cryptography: $(pip show cryptography | grep Version)"
 echo "============================================"

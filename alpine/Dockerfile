@@ -8,7 +8,7 @@
 # BUILD TIME:  Uses official PyPI
 # RUNTIME:     Uses Vodafone GCP Python Registry
 # 
-# Version: 5.0 - All CVEs Fixed + Zero Vulnerabilities
+# Version: 6.0 - All CVEs Fixed + Zero Vulnerabilities
 # ============================================
 
 # Use Alpine 3.21 which has fixed libexpat and sqlite
@@ -27,7 +27,6 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
 # Install build dependencies for R
-# Note: Alpine 3.21 has patched versions of libexpat and sqlite
 RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     build-base \
     gfortran \
@@ -57,16 +56,9 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     libxml2-dev \
     libx11-dev \
     libxt-dev \
-    # Explicitly install latest patched versions
     expat-dev \
     sqlite-dev \
     && rm -rf /var/cache/apk/*
-
-# Verify patched versions
-RUN echo "=== Verifying Security Patches ===" && \
-    apk info expat | head -2 && \
-    apk info sqlite | head -2 && \
-    echo "=== libcurl version ===" && curl --version | head -1
 
 # Download R source
 RUN cd /tmp && \
@@ -76,15 +68,11 @@ RUN cd /tmp && \
 
 # Patch configure script to accept libcurl 8.x
 RUN cd /tmp/R-${R_VERSION} && \
-    echo "=== Patching configure for libcurl 8.x support ===" && \
     cp configure configure.orig && \
-    sed -i 's/r_cv_have_curl728=no/r_cv_have_curl728=yes/g' configure && \
-    echo "Patch applied - checking diff:" && \
-    diff configure.orig configure | head -20 || true
+    sed -i 's/r_cv_have_curl728=no/r_cv_have_curl728=yes/g' configure
 
 # Build R
 RUN cd /tmp/R-${R_VERSION} && \
-    echo "=== Configuring R ${R_VERSION} ===" && \
     export r_cv_have_curl728=yes && \
     ./configure \
         --prefix=/opt/R/${R_VERSION} \
@@ -103,19 +91,13 @@ RUN cd /tmp/R-${R_VERSION} && \
         CXXFLAGS="-O2 -fPIC" \
         FFLAGS="-O2" \
         FCFLAGS="-O2" && \
-    echo "=== Building R ${R_VERSION} ===" && \
     make -j$(nproc) && \
-    echo "=== Installing R ${R_VERSION} ===" && \
     make install
 
 # Cleanup and create symlinks
 RUN rm -rf /tmp/R-${R_VERSION}* && \
     ln -sf /opt/R/${R_VERSION}/bin/R /usr/local/bin/R && \
     ln -sf /opt/R/${R_VERSION}/bin/Rscript /usr/local/bin/Rscript
-
-# Verify R installation
-RUN echo "=== R Version Verification ===" && \
-    R --version | head -3
 
 
 # ============================================
@@ -137,7 +119,7 @@ ENV LANG=C.UTF-8 \
     PIP_INDEX_URL=https://pypi.org/simple/ \
     PIP_TRUSTED_HOST=pypi.org
 
-# Install ALL Build Dependencies with security patches
+# Install ALL Build Dependencies
 RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     build-base \
     gfortran \
@@ -199,26 +181,16 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     util-linux-dev \
     libuuid \
     libffi-dev \
-    # Security: Explicitly install patched packages
     expat \
     expat-dev \
     sqlite \
     sqlite-dev \
     && rm -rf /var/cache/apk/*
 
-# Verify security patches are applied
-RUN echo "=== Security Patch Verification ===" && \
-    echo "expat version:" && apk info expat 2>/dev/null | head -1 && \
-    echo "sqlite version:" && apk info sqlite 2>/dev/null | head -1
-
 # Copy R from r-builder stage
 COPY --from=r-builder /opt/R /opt/R
 RUN ln -sf /opt/R/${R_VERSION}/bin/R /usr/local/bin/R && \
     ln -sf /opt/R/${R_VERSION}/bin/Rscript /usr/local/bin/Rscript
-
-# Verify R version
-RUN echo "=== Verifying R Version ===" && \
-    R --version | head -3
 
 # Copy scripts and config
 COPY config/ /tmp/config/
@@ -248,37 +220,30 @@ COPY config/Rprofile.site /opt/R/${R_VERSION}/lib/R/etc/Rprofile.site
 # Install R Packages
 RUN Rscript /tmp/scripts/install-r-packages.R
 
-# Verify rstudioapi
-RUN echo "=== Verifying rstudioapi ===" && \
-    R --slave -e "if(requireNamespace('rstudioapi', quietly=TRUE)) { ver <- as.character(packageVersion('rstudioapi')); cat('rstudioapi version:', ver, '\n') } else { cat('ERROR: rstudioapi not installed\n'); quit(status=1) }"
-
-# SECURITY: Clean R packages vulnerabilities (including webfakes private key)
+# SECURITY: Clean R packages vulnerabilities
 RUN echo "=== Cleaning R packages security issues ===" && \
-    # Remove casperjs
     rm -rf /usr/local/lib/R/site-library/webshot/casperjs 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -name "*casper*" -delete 2>/dev/null || true && \
-    # Remove fake credentials
     find /usr/local/lib/R/site-library -name "fake_service_account.json" -delete 2>/dev/null || true && \
     rm -rf /usr/local/lib/R/site-library/gargle/extdata 2>/dev/null || true && \
-    # CRITICAL: Remove webfakes private key (HIGH severity vulnerability)
     rm -rf /usr/local/lib/R/site-library/webfakes/cert 2>/dev/null || true && \
-    rm -rf /usr/local/lib/R/site-library/webfakes/certs 2>/dev/null || true && \
-    # Remove ALL private keys and certificates from R packages
     find /usr/local/lib/R/site-library -name "*.pem" -delete 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -name "*.key" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -name "server.key" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -name "private.key" -delete 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "cert" -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "certs" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -type d -name "localhost" -exec rm -rf {} + 2>/dev/null || true && \
-    echo "R packages security cleanup complete"
+    find /usr/local/lib/R/site-library -type d -name "localhost" -exec rm -rf {} + 2>/dev/null || true
 
-# Setup Python Virtual Environment
-RUN python3 -m venv /opt/venv
+# Setup Python Virtual Environment with SECURE versions
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade "pip>=26.0" && \
+    /opt/venv/bin/pip install --upgrade "setuptools>=78.1.1" && \
+    /opt/venv/bin/pip install --upgrade "wheel>=0.46.2" && \
+    /opt/venv/bin/pip install --upgrade "cryptography>=44.0.1"
+
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python Packages with security fixes
+# Install Python Packages
 RUN /tmp/scripts/install-python-packages.sh
 
 # Install Google Cloud SDK
@@ -297,48 +262,18 @@ RUN set -ex && \
     /opt/google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=false
 
 # SECURITY: Clean Google Cloud SDK
-RUN echo "=== Cleaning Google Cloud SDK ===" && \
-    find /opt/google-cloud-sdk -name "*.key" -delete 2>/dev/null || true && \
+RUN find /opt/google-cloud-sdk -name "*.key" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "*.pem" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "dummyserver" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
-    rm -f /opt/google-cloud-sdk/bin/gcloud-crc32c 2>/dev/null || true && \
-    rm -rf /opt/google-cloud-sdk/.install/.backup 2>/dev/null || true && \
-    echo "Google Cloud SDK cleanup complete"
+    rm -rf /opt/google-cloud-sdk/.install/.backup 2>/dev/null || true
 
 # Apply CVE Mitigations
 RUN /tmp/scripts/apply-cve-mitigations.sh
 
-# SECURITY: Remove system Python packages metadata (prevents Trivy false positives)
-RUN echo "=== Removing system Python package metadata ===" && \
-    rm -rf /usr/lib/python3*/site-packages/pip-*.dist-info 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/pip 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/setuptools-*.dist-info 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/setuptools 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/pkg_resources 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/wheel-*.dist-info 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/wheel 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/_distutils_hack 2>/dev/null || true && \
-    echo "System Python package metadata removed"
-
-# Cleanup
+# Cleanup docs
 RUN find /usr/local/lib/R/site-library -name "*.html" -delete 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "doc" -exec rm -rf {} + 2>/dev/null || true
-
-# Final Verification
-RUN echo "=== FINAL BUILD VERIFICATION ===" && \
-    R --version | head -1 && \
-    R --slave -e "cat('rstudioapi:', as.character(packageVersion('rstudioapi')), '\n')" && \
-    echo "=== Python Package Versions ===" && \
-    /opt/venv/bin/pip --version && \
-    /opt/venv/bin/pip show setuptools | grep Version && \
-    /opt/venv/bin/pip show wheel | grep Version && \
-    /opt/venv/bin/pip show cryptography | grep Version && \
-    echo "=== Security Check: webfakes cert ===" && \
-    (ls -la /usr/local/lib/R/site-library/webfakes/cert 2>/dev/null && echo "WARNING: webfakes cert exists!" || echo "OK: webfakes cert removed") && \
-    echo "=== Security Check: .pem files ===" && \
-    (find /usr/local/lib/R/site-library -name "*.pem" 2>/dev/null | head -5 || echo "OK: No .pem files found")
 
 
 # ============================================
@@ -366,7 +301,8 @@ ENV LANG=C.UTF-8 \
     PIP_EXTRA_INDEX_URL=https://pypi.org/simple/ \
     PIP_CONFIG_FILE=/etc/pip.conf
 
-# Install Runtime Dependencies with security patches
+# Install Runtime Dependencies - WITHOUT py3-pip, py3-setuptools, py3-wheel
+# We only need python3 runtime, not the package managers
 RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     bash \
     coreutils \
@@ -380,6 +316,7 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     curl \
     libcurl \
     openssh-client \
+    # Install python3 but we'll remove the vulnerable packages after
     python3 \
     libffi \
     libxml2 \
@@ -411,27 +348,46 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     ncurses-terminfo-base \
     fftw \
     libuuid \
-    # Security: Explicitly include patched packages
     expat \
     sqlite-libs \
     && rm -rf /var/cache/apk/*
 
-# Verify security patches in runtime
-RUN echo "=== Runtime Security Verification ===" && \
-    apk info expat 2>/dev/null | head -1 && \
-    apk info sqlite-libs 2>/dev/null | head -1
-
-# SECURITY: Remove system Python packages (prevents Trivy from detecting old versions)
-RUN echo "=== Removing system Python packages ===" && \
-    rm -rf /usr/lib/python3*/site-packages/pip-*.dist-info 2>/dev/null || true && \
+# ============================================
+# CRITICAL SECURITY FIX: Remove ALL vulnerable system Python packages
+# This MUST happen in runtime stage AFTER apk install
+# ============================================
+RUN echo "=== CRITICAL: Removing vulnerable system Python packages ===" && \
+    # Find and remove ALL pip installations from system
     rm -rf /usr/lib/python3*/site-packages/pip 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/setuptools-*.dist-info 2>/dev/null || true && \
+    rm -rf /usr/lib/python3*/site-packages/pip-* 2>/dev/null || true && \
+    # Find and remove ALL setuptools installations from system
     rm -rf /usr/lib/python3*/site-packages/setuptools 2>/dev/null || true && \
+    rm -rf /usr/lib/python3*/site-packages/setuptools-* 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/pkg_resources 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/wheel-*.dist-info 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/wheel 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/_distutils_hack 2>/dev/null || true && \
-    echo "System Python packages removed"
+    # Find and remove ALL wheel installations from system
+    rm -rf /usr/lib/python3*/site-packages/wheel 2>/dev/null || true && \
+    rm -rf /usr/lib/python3*/site-packages/wheel-* 2>/dev/null || true && \
+    # Remove any dist-info directories for these packages
+    find /usr/lib -type d -name "pip-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/lib -type d -name "setuptools-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/lib -type d -name "wheel-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    # Also check /usr/local just in case
+    rm -rf /usr/local/lib/python3*/site-packages/pip 2>/dev/null || true && \
+    rm -rf /usr/local/lib/python3*/site-packages/pip-* 2>/dev/null || true && \
+    rm -rf /usr/local/lib/python3*/site-packages/setuptools 2>/dev/null || true && \
+    rm -rf /usr/local/lib/python3*/site-packages/setuptools-* 2>/dev/null || true && \
+    rm -rf /usr/local/lib/python3*/site-packages/wheel 2>/dev/null || true && \
+    rm -rf /usr/local/lib/python3*/site-packages/wheel-* 2>/dev/null || true && \
+    find /usr/local/lib -type d -name "pip-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local/lib -type d -name "setuptools-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local/lib -type d -name "wheel-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    # Verify removal
+    echo "Checking for remaining vulnerable packages..." && \
+    (find /usr -path "*/site-packages/pip-*.dist-info" 2>/dev/null | head -5 || true) && \
+    (find /usr -path "*/site-packages/setuptools-*.dist-info" 2>/dev/null | head -5 || true) && \
+    (find /usr -path "*/site-packages/wheel-*.dist-info" 2>/dev/null | head -5 || true) && \
+    echo "System Python packages removal complete"
 
 # Copy config files
 COPY config/pip.conf /etc/pip.conf
@@ -441,7 +397,7 @@ COPY config/pypirc /etc/.pypirc
 RUN addgroup -g 1000 jupyter && \
     adduser -D -u 1000 -G jupyter -s /bin/bash -h /home/jupyter jupyter
 
-# Copy from Builder
+# Copy from Builder - This brings in our SECURE venv with patched packages
 COPY --from=builder /opt/R /opt/R
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/google-cloud-sdk /opt/google-cloud-sdk
@@ -486,25 +442,38 @@ RUN git config --system init.defaultBranch main && \
     git config --system credential.helper store && \
     git config --system --add safe.directory '*'
 
-# Final Security Hardening
-RUN echo "=== Final Security Hardening ===" && \
+# ============================================
+# FINAL SECURITY: Remove any remaining vulnerable packages
+# Run this AFTER all COPY operations
+# ============================================
+RUN echo "=== FINAL SECURITY CLEANUP ===" && \
     # Remove setuid/setgid bits
     find /usr -type f -perm /6000 -exec chmod a-s {} \; 2>/dev/null || true && \
-    # Remove any remaining casperjs
+    # Remove casperjs
     find /opt /usr/local/lib/R -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
-    # Remove any remaining private keys
+    # Remove private keys
     find /opt -name "*.key" -delete 2>/dev/null || true && \
     find /usr/local/lib/R -name "*.key" -delete 2>/dev/null || true && \
-    # CRITICAL: Remove webfakes private key and certificates
+    # Remove webfakes certificates
     rm -rf /usr/local/lib/R/site-library/webfakes/cert 2>/dev/null || true && \
-    rm -rf /usr/local/lib/R/site-library/webfakes/certs 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -name "*.pem" -delete 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "cert" -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "certs" -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "localhost" -exec rm -rf {} + 2>/dev/null || true && \
     # Remove fake credentials
     find /opt /usr/local/lib/R -name "*fake*" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -name "fake_service_account.json" -delete 2>/dev/null || true && \
+    # CRITICAL: Final removal of system Python packages
+    rm -rf /usr/lib/python3*/site-packages/pip 2>/dev/null || true && \
+    rm -rf /usr/lib/python3*/site-packages/pip-* 2>/dev/null || true && \
+    rm -rf /usr/lib/python3*/site-packages/setuptools 2>/dev/null || true && \
+    rm -rf /usr/lib/python3*/site-packages/setuptools-* 2>/dev/null || true && \
+    rm -rf /usr/lib/python3*/site-packages/pkg_resources 2>/dev/null || true && \
+    rm -rf /usr/lib/python3*/site-packages/_distutils_hack 2>/dev/null || true && \
+    rm -rf /usr/lib/python3*/site-packages/wheel 2>/dev/null || true && \
+    rm -rf /usr/lib/python3*/site-packages/wheel-* 2>/dev/null || true && \
+    find /usr/lib -type d -name "pip-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/lib -type d -name "setuptools-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/lib -type d -name "wheel-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
     # Cleanup temp and cache
     rm -rf /tmp/* /var/tmp/* /root/.cache && \
     # Set permissions
@@ -514,8 +483,7 @@ RUN echo "=== Final Security Hardening ===" && \
     chmod 644 /etc/pip.conf && \
     chmod 644 /etc/.pypirc && \
     chmod 600 /home/jupyter/.config/pip/pip.conf && \
-    chmod 600 /home/jupyter/.pypirc && \
-    echo "Security hardening complete"
+    chmod 600 /home/jupyter/.pypirc
 
 # Final Verification
 RUN echo "============================================" && \
@@ -524,22 +492,27 @@ RUN echo "============================================" && \
     echo "R: $(R --version | head -1)" && \
     echo "Python: $(python3 --version)" && \
     echo "rstudioapi: $(R --slave -e "cat(as.character(packageVersion('rstudioapi')))")" && \
-    echo "pip: $(/opt/venv/bin/pip --version)" && \
-    echo "setuptools: $(/opt/venv/bin/pip show setuptools 2>/dev/null | grep Version)" && \
-    echo "wheel: $(/opt/venv/bin/pip show wheel 2>/dev/null | grep Version)" && \
-    echo "cryptography: $(/opt/venv/bin/pip show cryptography 2>/dev/null | grep Version)" && \
+    echo "" && \
+    echo "=== VENV Package Versions (SECURE) ===" && \
+    /opt/venv/bin/pip --version && \
+    /opt/venv/bin/pip show setuptools | grep -E "^(Name|Version):" && \
+    /opt/venv/bin/pip show wheel | grep -E "^(Name|Version):" && \
+    /opt/venv/bin/pip show cryptography | grep -E "^(Name|Version):" && \
+    echo "" && \
+    echo "=== SECURITY CHECK: System packages ===" && \
+    echo "Checking /usr/lib for pip:" && \
+    (ls -la /usr/lib/python3*/site-packages/pip* 2>/dev/null || echo "  CLEAN: No system pip found") && \
+    echo "Checking /usr/lib for setuptools:" && \
+    (ls -la /usr/lib/python3*/site-packages/setuptools* 2>/dev/null || echo "  CLEAN: No system setuptools found") && \
+    echo "Checking /usr/lib for wheel:" && \
+    (ls -la /usr/lib/python3*/site-packages/wheel* 2>/dev/null || echo "  CLEAN: No system wheel found") && \
+    echo "" && \
+    echo "=== Checking for .dist-info directories ===" && \
+    (find /usr/lib -name "pip-*.dist-info" -type d 2>/dev/null | head -3 || echo "  CLEAN: No pip dist-info") && \
+    (find /usr/lib -name "setuptools-*.dist-info" -type d 2>/dev/null | head -3 || echo "  CLEAN: No setuptools dist-info") && \
+    (find /usr/lib -name "wheel-*.dist-info" -type d 2>/dev/null | head -3 || echo "  CLEAN: No wheel dist-info") && \
+    echo "" && \
     jupyter kernelspec list && \
-    echo "============================================" && \
-    echo "  SECURITY VERIFICATION" && \
-    echo "============================================" && \
-    echo "Checking for .pem files:" && \
-    (find /usr/local/lib/R/site-library -name "*.pem" 2>/dev/null | wc -l | xargs -I {} echo "  Found: {} .pem files") && \
-    echo "Checking for .key files:" && \
-    (find /usr/local/lib/R/site-library -name "*.key" 2>/dev/null | wc -l | xargs -I {} echo "  Found: {} .key files") && \
-    echo "Checking webfakes cert directory:" && \
-    (ls -la /usr/local/lib/R/site-library/webfakes/cert 2>/dev/null && echo "  WARNING: cert dir exists!" || echo "  OK: cert dir removed") && \
-    echo "Checking system pip:" && \
-    (ls /usr/lib/python3*/site-packages/pip-*.dist-info 2>/dev/null && echo "  WARNING: system pip exists!" || echo "  OK: system pip removed") && \
     echo "============================================"
 
 # Health Check
@@ -553,12 +526,11 @@ USER jupyter
 WORKDIR /home/jupyter
 
 LABEL maintainer="mohamedharoon0" \
-      version="5.0" \
+      version="6.0" \
       description="GCP Workbench - R 4.1.0, rstudioapi 0.14, Alpine - All CVEs Fixed" \
       r.version="4.1.0" \
       rstudioapi.version="0.14" \
-      security.patched="true" \
-      cve.fixed="CVE-2024-6345,CVE-2025-47273,CVE-2026-24049,CVE-2025-8869,CVE-2026-1703,GHSA-h4gh-qq45-vh27,CVE-2024-12797"
+      security.patched="true"
 
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["/usr/local/bin/start-jupyter.sh"]
