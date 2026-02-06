@@ -1,6 +1,7 @@
 #!/bin/bash
 # ============================================
 # Jupyter Startup Script
+# GCP Workbench - R 4.1.0 + Python
 # ============================================
 
 set -e
@@ -15,14 +16,41 @@ mkdir -p /home/jupyter/.config/gcloud
 # Export environment
 export GOOGLE_CLOUD_PROJECT="${GOOGLE_CLOUD_PROJECT:-}"
 export CLOUDSDK_CONFIG="/home/jupyter/.config/gcloud"
+export HOME="/home/jupyter"
 
 # Log startup
 echo "============================================"
 echo "Starting Jupyter Lab"
-echo "Python: $(python3 --version)"
-echo "R: $(R --version | head -1)"
-echo "Git: $(git --version)"
-echo "gcloud: $(gcloud --version 2>/dev/null | head -1 || echo 'available')"
+echo "============================================"
+echo "Date: $(date)"
+echo "User: $(whoami)"
+echo "Home: $HOME"
+echo "Python: $(python3 --version 2>&1)"
+echo "pip: $(pip --version 2>&1)"
+echo "R: $(R --version 2>&1 | head -1)"
+echo "Git: $(git --version 2>&1)"
+echo "gcloud: $(gcloud --version 2>&1 | head -1 || echo 'available')"
+echo "============================================"
+echo "Installed Jupyter Kernels:"
+jupyter kernelspec list 2>&1
+echo "============================================"
+
+# Verify R kernel is available
+if jupyter kernelspec list 2>&1 | grep -q "ir"; then
+    echo "R kernel: OK"
+else
+    echo "WARNING: R kernel not found!"
+fi
+
+# Verify Python kernel is available
+if jupyter kernelspec list 2>&1 | grep -q "python3"; then
+    echo "Python kernel: OK"
+else
+    echo "WARNING: Python kernel not found!"
+fi
+
+echo "============================================"
+echo "Starting Jupyter Lab on port 8080..."
 echo "============================================"
 
 # Start Jupyter

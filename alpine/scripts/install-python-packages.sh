@@ -18,7 +18,6 @@ export PIP_TRUSTED_HOST=pypi.org
 
 # ============================================
 # SECURITY FIX: Upgrade core packages FIRST
-# This MUST happen before any other installations
 # ============================================
 echo ">>> SECURITY: Upgrading core packages to fix all CVEs..."
 echo ">>> Target versions:"
@@ -27,36 +26,42 @@ echo "    - setuptools >= 78.1.1 (fixes CVE-2024-6345, CVE-2025-47273)"
 echo "    - wheel >= 0.46.2 (fixes CVE-2026-24049)"
 echo "    - cryptography >= 44.0.1 (fixes GHSA-h4gh-qq45-vh27, CVE-2024-12797)"
 
-# Upgrade pip first using the current pip
+# Upgrade pip first
 pip install --no-cache-dir --upgrade "pip>=26.0"
 
-# Now use the upgraded pip for everything else
+# Now upgrade other security packages
 pip install --no-cache-dir --upgrade \
     "setuptools>=78.1.1" \
     "wheel>=0.46.2" \
     "cryptography>=44.0.1"
 
-# Verify versions immediately
+# Verify versions
 echo ""
 echo ">>> Verifying security package versions..."
-PIP_VER=$(pip show pip | grep "^Version:" | awk '{print \$2}')
-SETUPTOOLS_VER=$(pip show setuptools | grep "^Version:" | awk '{print \$2}')
-WHEEL_VER=$(pip show wheel | grep "^Version:" | awk '{print \$2}')
-CRYPTO_VER=$(pip show cryptography | grep "^Version:" | awk '{print \$2}')
+PIP_VER=$(pip show pip | grep "^Version:" | cut -d' ' -f2)
+SETUPTOOLS_VER=$(pip show setuptools | grep "^Version:" | cut -d' ' -f2)
+WHEEL_VER=$(pip show wheel | grep "^Version:" | cut -d' ' -f2)
+CRYPTO_VER=$(pip show cryptography | grep "^Version:" | cut -d' ' -f2)
 
 echo "    pip: ${PIP_VER}"
 echo "    setuptools: ${SETUPTOOLS_VER}"
 echo "    wheel: ${WHEEL_VER}"
 echo "    cryptography: ${CRYPTO_VER}"
 
-# Fail fast if versions are not correct
+# Version check function
 check_version() {
     local pkg=\$1
     local current=\$2
     local required=\$3
     
-    # Simple version comparison (works for most cases)
-    if [ "$(printf '%s\n' "$required" "$current" | sort -V | head -n1)" != "$required" ]; then
+    if [ -z "$current" ]; then
+        echo "ERROR: $pkg version not found"
+        exit 1
+    fi
+    
+    # Compare versions using sort -V
+    local lowest=$(printf '%s\n' "$required" "$current" | sort -V | head -n1)
+    if [ "$lowest" != "$required" ]; then
         echo "ERROR: $pkg version $current is less than required $required"
         exit 1
     fi
@@ -120,7 +125,7 @@ pip install --no-cache-dir --upgrade \
     "requests>=2.31"
 
 # ============================================
-# SECURITY: Final verification and re-upgrade
+# SECURITY: Final re-upgrade
 # Some packages may have downgraded our security packages
 # ============================================
 echo ""
@@ -131,7 +136,7 @@ pip install --no-cache-dir --upgrade \
     "wheel>=0.46.2" \
     "cryptography>=44.0.1"
 
-# Remove vendored wheel from setuptools (additional security measure)
+# Remove vendored wheel from setuptools
 echo ""
 echo ">>> Applying setuptools security fixes..."
 SETUPTOOLS_PATH=$(python3 -c "import setuptools; import os; print(os.path.dirname(setuptools.__file__))" 2>/dev/null || echo "")
@@ -149,17 +154,17 @@ echo "FINAL VERIFICATION"
 echo "============================================"
 
 echo ""
-echo "=== SECURITY PACKAGE VERSIONS (MUST BE FIXED) ==="
+echo "=== SECURITY PACKAGE VERSIONS ==="
 pip --version
 pip show setuptools | grep -E "^(Name|Version):"
 pip show wheel | grep -E "^(Name|Version):"
 pip show cryptography | grep -E "^(Name|Version):"
 
 # Final version check
-PIP_VER=$(pip show pip | grep "^Version:" | awk '{print \$2}')
-SETUPTOOLS_VER=$(pip show setuptools | grep "^Version:" | awk '{print \$2}')
-WHEEL_VER=$(pip show wheel | grep "^Version:" | awk '{print \$2}')
-CRYPTO_VER=$(pip show cryptography | grep "^Version:" | awk '{print \$2}')
+PIP_VER=$(pip show pip | grep "^Version:" | cut -d' ' -f2)
+SETUPTOOLS_VER=$(pip show setuptools | grep "^Version:" | cut -d' ' -f2)
+WHEEL_VER=$(pip show wheel | grep "^Version:" | cut -d' ' -f2)
+CRYPTO_VER=$(pip show cryptography | grep "^Version:" | cut -d' ' -f2)
 
 echo ""
 echo ">>> Final version verification..."
