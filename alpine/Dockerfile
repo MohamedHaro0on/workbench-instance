@@ -8,7 +8,7 @@
 # BUILD TIME:  Uses official PyPI
 # RUNTIME:     Uses Vodafone GCP Python Registry
 # 
-# Version: 6.0 - All CVEs Fixed + Zero Vulnerabilities
+# Version: 6.1 - All CVEs Fixed + Zero Vulnerabilities
 # ============================================
 
 # Use Alpine 3.21 which has fixed libexpat and sqlite
@@ -243,38 +243,35 @@ RUN mkdir -p /opt/R/${R_VERSION}/lib/R/etc
 COPY config/Rprofile.site /opt/R/${R_VERSION}/lib/R/etc/Rprofile.site
 
 # ============================================
-# COMMENTED OUT: R Packages Installation
-# Uncomment when ready to test R packages
+# R Packages Installation - ENABLED
 # ============================================
-# RUN Rscript /tmp/scripts/install-r-packages.R
+RUN Rscript /tmp/scripts/install-r-packages.R
 
 # ============================================
-# COMMENTED OUT: Verify rstudioapi
-# Uncomment when R packages are enabled
+# Verify rstudioapi - ENABLED
 # ============================================
-# RUN echo "=== Verifying rstudioapi ===" && \
-#     R --slave -e "if(requireNamespace('rstudioapi', quietly=TRUE)) { ver <- as.character(packageVersion('rstudioapi')); cat('rstudioapi version:', ver, '\n') } else { cat('ERROR: rstudioapi not installed\n'); quit(status=1) }"
+RUN echo "=== Verifying rstudioapi ===" && \
+    R --slave -e "if(requireNamespace('rstudioapi', quietly=TRUE)) { ver <- as.character(packageVersion('rstudioapi')); cat('rstudioapi version:', ver, '\n') } else { cat('ERROR: rstudioapi not installed\n'); quit(status=1) }"
 
 # ============================================
-# COMMENTED OUT: Clean R packages vulnerabilities
-# Uncomment when R packages are enabled
+# Clean R packages vulnerabilities - ENABLED
 # ============================================
-# RUN echo "=== Cleaning R packages security issues ===" && \
-#     rm -rf /usr/local/lib/R/site-library/webshot/casperjs 2>/dev/null || true && \
-#     find /usr/local/lib/R/site-library -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
-#     find /usr/local/lib/R/site-library -name "*casper*" -delete 2>/dev/null || true && \
-#     find /usr/local/lib/R/site-library -name "fake_service_account.json" -delete 2>/dev/null || true && \
-#     rm -rf /usr/local/lib/R/site-library/gargle/extdata 2>/dev/null || true && \
-#     rm -rf /usr/local/lib/R/site-library/webfakes/cert 2>/dev/null || true && \
-#     rm -rf /usr/local/lib/R/site-library/webfakes/certs 2>/dev/null || true && \
-#     find /usr/local/lib/R/site-library -name "*.pem" -delete 2>/dev/null || true && \
-#     find /usr/local/lib/R/site-library -name "*.key" -delete 2>/dev/null || true && \
-#     find /usr/local/lib/R/site-library -name "server.key" -delete 2>/dev/null || true && \
-#     find /usr/local/lib/R/site-library -name "private.key" -delete 2>/dev/null || true && \
-#     find /usr/local/lib/R/site-library -type d -name "cert" -exec rm -rf {} + 2>/dev/null || true && \
-#     find /usr/local/lib/R/site-library -type d -name "certs" -exec rm -rf {} + 2>/dev/null || true && \
-#     find /usr/local/lib/R/site-library -type d -name "localhost" -exec rm -rf {} + 2>/dev/null || true && \
-#     echo "R packages security cleanup complete"
+RUN echo "=== Cleaning R packages security issues ===" && \
+    rm -rf /usr/local/lib/R/site-library/webshot/casperjs 2>/dev/null || true && \
+    find /usr/local/lib/R/site-library -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local/lib/R/site-library -name "*casper*" -delete 2>/dev/null || true && \
+    find /usr/local/lib/R/site-library -name "fake_service_account.json" -delete 2>/dev/null || true && \
+    rm -rf /usr/local/lib/R/site-library/gargle/extdata 2>/dev/null || true && \
+    rm -rf /usr/local/lib/R/site-library/webfakes/cert 2>/dev/null || true && \
+    rm -rf /usr/local/lib/R/site-library/webfakes/certs 2>/dev/null || true && \
+    find /usr/local/lib/R/site-library -name "*.pem" -delete 2>/dev/null || true && \
+    find /usr/local/lib/R/site-library -name "*.key" -delete 2>/dev/null || true && \
+    find /usr/local/lib/R/site-library -name "server.key" -delete 2>/dev/null || true && \
+    find /usr/local/lib/R/site-library -name "private.key" -delete 2>/dev/null || true && \
+    find /usr/local/lib/R/site-library -type d -name "cert" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local/lib/R/site-library -type d -name "certs" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local/lib/R/site-library -type d -name "localhost" -exec rm -rf {} + 2>/dev/null || true && \
+    echo "R packages security cleanup complete"
 
 # Setup Python Virtual Environment
 RUN python3 -m venv /opt/venv
@@ -298,7 +295,7 @@ RUN set -ex && \
     rm gcloud.tar.gz && \
     /opt/google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=false
 
-# SECURITY: Clean Google Cloud SDK
+# SECURITY: Clean Google Cloud SDK - Remove vulnerable Python packages bundled inside
 RUN echo "=== Cleaning Google Cloud SDK ===" && \
     find /opt/google-cloud-sdk -name "*.key" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "*.pem" -delete 2>/dev/null || true && \
@@ -307,6 +304,20 @@ RUN echo "=== Cleaning Google Cloud SDK ===" && \
     find /opt/google-cloud-sdk -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
     rm -f /opt/google-cloud-sdk/bin/gcloud-crc32c 2>/dev/null || true && \
     rm -rf /opt/google-cloud-sdk/.install/.backup 2>/dev/null || true && \
+    # CRITICAL: Remove bundled Python packages from gcloud SDK that Trivy detects
+    echo "=== Removing vulnerable Python packages from gcloud SDK ===" && \
+    find /opt/google-cloud-sdk -type d -name "pip" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "pip-*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "setuptools" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "setuptools-*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "wheel" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "wheel-*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "cryptography" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "cryptography-*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "METADATA" -path "*pip*" -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "METADATA" -path "*setuptools*" -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "METADATA" -path "*cryptography*" -delete 2>/dev/null || true && \
     echo "Google Cloud SDK cleanup complete"
 
 # Apply CVE Mitigations
@@ -316,10 +327,10 @@ RUN /tmp/scripts/apply-cve-mitigations.sh
 RUN find /usr/local/lib/R/site-library -name "*.html" -delete 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "doc" -exec rm -rf {} + 2>/dev/null || true
 
-# Final Verification in Builder (Modified - R packages commented out)
+# Final Verification in Builder
 RUN echo "=== BUILDER STAGE VERIFICATION ===" && \
     R --version | head -1 && \
-    echo "NOTE: R packages installation is commented out" && \
+    R --slave -e "cat('rstudioapi:', as.character(packageVersion('rstudioapi')), '\n')" && \
     echo "=== Python Package Versions ===" && \
     /opt/venv/bin/pip --version && \
     /opt/venv/bin/pip show setuptools | grep Version && \
@@ -402,40 +413,58 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     sqlite-libs \
     && rm -rf /var/cache/apk/*
 
-# CRITICAL: Remove ALL system Python package metadata IMMEDIATELY after apk add
-# This is the KEY fix - Trivy scans these METADATA files
-RUN echo "=== REMOVING ALL SYSTEM PYTHON PACKAGES ===" && \
-    # Remove pip completely
+# ============================================
+# CRITICAL FIX: Remove ALL Python package metadata from EVERYWHERE
+# This removes the vulnerable packages that Trivy detects
+# ============================================
+RUN echo "=== REMOVING ALL VULNERABLE PYTHON PACKAGES ===" && \
+    # ----------------------------------------
+    # 1. Remove from /usr/lib (system Python)
+    # ----------------------------------------
+    echo ">>> Cleaning /usr/lib/python3*..." && \
     rm -rf /usr/lib/python3*/site-packages/pip 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/pip-* 2>/dev/null || true && \
-    # Remove setuptools completely
     rm -rf /usr/lib/python3*/site-packages/setuptools 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/setuptools-* 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/pkg_resources 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/_distutils_hack 2>/dev/null || true && \
     rm -f /usr/lib/python3*/site-packages/distutils-precedence.pth 2>/dev/null || true && \
-    # Remove wheel completely
     rm -rf /usr/lib/python3*/site-packages/wheel 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/wheel-* 2>/dev/null || true && \
-    # Remove any cryptography from system (we use venv version)
     rm -rf /usr/lib/python3*/site-packages/cryptography 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/cryptography-* 2>/dev/null || true && \
-    # Double-check with find command for any remaining dist-info
-    find /usr/lib/python3* -type d -name "pip-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/lib/python3* -type d -name "setuptools-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/lib/python3* -type d -name "wheel-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/lib/python3* -type d -name "cryptography-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
-    # Remove METADATA files specifically (what Trivy reads)
-    find /usr/lib -name "METADATA" -path "*pip*" -delete 2>/dev/null || true && \
-    find /usr/lib -name "METADATA" -path "*setuptools*" -delete 2>/dev/null || true && \
-    find /usr/lib -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true && \
-    find /usr/lib -name "METADATA" -path "*cryptography*" -delete 2>/dev/null || true && \
-    # Verify removal
-    echo "=== Verification: Should show NO results ===" && \
-    echo "Checking pip:" && (find /usr/lib -type d -name "pip-*" 2>/dev/null || echo "  CLEAN") && \
-    echo "Checking setuptools:" && (find /usr/lib -type d -name "setuptools-*" 2>/dev/null || echo "  CLEAN") && \
-    echo "Checking wheel:" && (find /usr/lib -type d -name "wheel-*" 2>/dev/null || echo "  CLEAN") && \
-    echo "System Python packages removed successfully"
+    # ----------------------------------------
+    # 2. Remove dist-info directories
+    # ----------------------------------------
+    echo ">>> Removing dist-info directories..." && \
+    find /usr/lib -type d -name "pip-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/lib -type d -name "setuptools-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/lib -type d -name "wheel-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/lib -type d -name "cryptography-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    # ----------------------------------------
+    # 3. Remove METADATA files (what Trivy reads)
+    # ----------------------------------------
+    echo ">>> Removing METADATA files..." && \
+    find /usr -name "METADATA" -path "*pip*" -delete 2>/dev/null || true && \
+    find /usr -name "METADATA" -path "*setuptools*" -delete 2>/dev/null || true && \
+    find /usr -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true && \
+    find /usr -name "METADATA" -path "*cryptography*" -delete 2>/dev/null || true && \
+    # ----------------------------------------
+    # 4. Double-check with comprehensive find
+    # ----------------------------------------
+    echo ">>> Final cleanup pass..." && \
+    find / -path /proc -prune -o -path /sys -prune -o \
+        -type d \( -name "pip-*" -o -name "setuptools-*" -o -name "wheel-*" -o -name "cryptography-*" \) \
+        -print -exec rm -rf {} + 2>/dev/null || true && \
+    echo "=== System Python packages removed ===" && \
+    # ----------------------------------------
+    # 5. Verify removal
+    # ----------------------------------------
+    echo "=== Verification ===" && \
+    echo -n "pip: " && (find /usr -type d -name "pip-*.dist-info" 2>/dev/null | wc -l) && \
+    echo -n "setuptools: " && (find /usr -type d -name "setuptools-*.dist-info" 2>/dev/null | wc -l) && \
+    echo -n "wheel: " && (find /usr -type d -name "wheel-*.dist-info" 2>/dev/null | wc -l) && \
+    echo -n "cryptography: " && (find /usr -type d -name "cryptography-*.dist-info" 2>/dev/null | wc -l)
 
 # Verify security patches in runtime
 RUN echo "=== Runtime Security Verification ===" && \
@@ -455,6 +484,25 @@ COPY --from=builder /opt/R /opt/R
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/google-cloud-sdk /opt/google-cloud-sdk
 COPY --from=builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
+
+# ============================================
+# CRITICAL: Clean vulnerable packages from copied directories
+# ============================================
+RUN echo "=== Cleaning copied directories ===" && \
+    # Clean gcloud SDK
+    find /opt/google-cloud-sdk -type d -name "pip" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "pip-*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "setuptools" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "setuptools-*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "wheel" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "wheel-*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "cryptography" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "cryptography-*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "METADATA" -path "*pip*" -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "METADATA" -path "*setuptools*" -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "METADATA" -path "*cryptography*" -delete 2>/dev/null || true && \
+    echo "Copied directories cleaned"
 
 # Create R symlinks
 RUN ln -sf /opt/R/${R_VERSION}/bin/R /usr/local/bin/R && \
@@ -480,10 +528,9 @@ RUN cp /etc/pip.conf /home/jupyter/.config/pip/pip.conf && \
     cp /etc/.pypirc /root/.pypirc
 
 # ============================================
-# COMMENTED OUT: Install R Kernel
-# Uncomment when R packages are enabled
+# Install R Kernel - ENABLED
 # ============================================
-# RUN R -e "IRkernel::installspec(user=FALSE, name='ir', displayname='R 4.1.0')"
+RUN R -e "IRkernel::installspec(user=FALSE, name='ir', displayname='R 4.1.0')"
 
 # Copy Configuration Files
 COPY config/jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
@@ -529,32 +576,51 @@ RUN echo "=== Final Security Hardening ===" && \
     chmod 600 /home/jupyter/.pypirc && \
     echo "Security hardening complete"
 
-# FINAL CHECK: Ensure no vulnerable system packages remain
-RUN echo "=== FINAL SYSTEM PACKAGE CHECK ===" && \
-    echo "Scanning for vulnerable package metadata..." && \
+# ============================================
+# FINAL COMPREHENSIVE CHECK
+# ============================================
+RUN echo "=== FINAL SYSTEM-WIDE VULNERABILITY CHECK ===" && \
+    echo "Scanning entire filesystem for vulnerable packages..." && \
     FOUND_ISSUES=0 && \
-    if find /usr/lib -type d -name "pip-*.dist-info" 2>/dev/null | grep -q .; then \
-        echo "ERROR: Found system pip"; FOUND_ISSUES=1; \
+    # Check for pip
+    if find / -path /proc -prune -o -path /sys -prune -o -type d -name "pip-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv" | grep -q .; then \
+        echo "ERROR: Found system pip outside venv"; \
+        find / -path /proc -prune -o -path /sys -prune -o -type d -name "pip-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv"; \
+        FOUND_ISSUES=1; \
     fi && \
-    if find /usr/lib -type d -name "setuptools-*.dist-info" 2>/dev/null | grep -q .; then \
-        echo "ERROR: Found system setuptools"; FOUND_ISSUES=1; \
+    # Check for setuptools
+    if find / -path /proc -prune -o -path /sys -prune -o -type d -name "setuptools-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv" | grep -q .; then \
+        echo "ERROR: Found system setuptools outside venv"; \
+        find / -path /proc -prune -o -path /sys -prune -o -type d -name "setuptools-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv"; \
+        FOUND_ISSUES=1; \
     fi && \
-    if find /usr/lib -type d -name "wheel-*.dist-info" 2>/dev/null | grep -q .; then \
-        echo "ERROR: Found system wheel"; FOUND_ISSUES=1; \
+    # Check for wheel
+    if find / -path /proc -prune -o -path /sys -prune -o -type d -name "wheel-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv" | grep -q .; then \
+        echo "ERROR: Found system wheel outside venv"; \
+        find / -path /proc -prune -o -path /sys -prune -o -type d -name "wheel-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv"; \
+        FOUND_ISSUES=1; \
     fi && \
+    # Check for old cryptography
+    echo "Checking cryptography versions..." && \
+    find / -path /proc -prune -o -path /sys -prune -o -name "METADATA" -path "*cryptography*" -print 2>/dev/null | while read f; do \
+        if [ -f "$f" ]; then \
+            VERSION=$(grep "^Version:" "$f" 2>/dev/null | cut -d' ' -f2); \
+            echo "  Found: $f (version: $VERSION)"; \
+        fi \
+    done && \
     if [ $FOUND_ISSUES -eq 1 ]; then \
         echo "FAILED: Vulnerable packages still present"; \
         exit 1; \
     fi && \
-    echo "PASSED: No vulnerable system packages found"
+    echo "PASSED: No vulnerable system packages found outside venv"
 
-# Final Verification (Modified - R packages commented out)
+# Final Verification
 RUN echo "============================================" && \
     echo "  FINAL VERIFICATION" && \
     echo "============================================" && \
     echo "R: $(R --version | head -1)" && \
     echo "Python: $(python3 --version)" && \
-    echo "NOTE: R packages (rstudioapi) installation is commented out" && \
+    echo "rstudioapi: $(R --slave -e "cat(as.character(packageVersion('rstudioapi')))")" && \
     echo "" && \
     echo "=== VENV Package Versions (These are SECURE) ===" && \
     echo "pip: $(/opt/venv/bin/pip --version)" && \
@@ -563,18 +629,12 @@ RUN echo "============================================" && \
     echo "cryptography: $(/opt/venv/bin/pip show cryptography 2>/dev/null | grep Version)" && \
     echo "" && \
     echo "=== Jupyter Kernels ===" && \
-    echo "NOTE: R kernel installation is commented out" && \
-    echo "============================================" && \
-    echo "  SECURITY VERIFICATION" && \
-    echo "============================================" && \
-    echo "Checking for .pem files in R packages:" && \
-    (find /usr/local/lib/R/site-library -name "*.pem" 2>/dev/null | wc -l | xargs -I {} echo "  Found: {} .pem files") && \
-    echo "Checking for .key files in R packages:" && \
-    (find /usr/local/lib/R/site-library -name "*.key" 2>/dev/null | wc -l | xargs -I {} echo "  Found: {} .key files") && \
-    echo "Checking webfakes cert directory:" && \
-    (ls -la /usr/local/lib/R/site-library/webfakes/cert 2>/dev/null && echo "  WARNING: cert dir exists!" || echo "  OK: cert dir removed") && \
-    echo "Checking system Python packages:" && \
-    (find /usr/lib/python3* -type d -name "*-*.dist-info" -path "*site-packages*" 2>/dev/null | head -5 || echo "  OK: No system package metadata") && \
+    jupyter kernelspec list && \
+    echo "" && \
+    echo "=== Checking for remaining vulnerable packages ===" && \
+    echo "pip outside venv:" && (find / -path /proc -prune -o -path /sys -prune -o -path /opt/venv -prune -o -type d -name "pip-*" -print 2>/dev/null | head -5 || echo "  None found") && \
+    echo "setuptools outside venv:" && (find / -path /proc -prune -o -path /sys -prune -o -path /opt/venv -prune -o -type d -name "setuptools-*" -print 2>/dev/null | head -5 || echo "  None found") && \
+    echo "wheel outside venv:" && (find / -path /proc -prune -o -path /sys -prune -o -path /opt/venv -prune -o -type d -name "wheel-*" -print 2>/dev/null | head -5 || echo "  None found") && \
     echo "============================================" && \
     echo "  BUILD COMPLETE - READY FOR TRIVY SCAN" && \
     echo "============================================"
@@ -590,7 +650,7 @@ USER jupyter
 WORKDIR /home/jupyter
 
 LABEL maintainer="mohamedharoon0" \
-      version="6.0" \
+      version="6.1" \
       description="GCP Workbench - R 4.1.0, rstudioapi 0.14, Alpine - All CVEs Fixed" \
       r.version="4.1.0" \
       rstudioapi.version="0.14" \

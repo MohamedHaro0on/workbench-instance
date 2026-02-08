@@ -50,9 +50,9 @@ echo "    cryptography: ${CRYPTO_VER}"
 
 # Version check function - FIXED: removed backslashes from \$1, \$2, \$3
 check_version() {
-    local pkg=\$1
-    local current=\$2
-    local required=\$3
+    local pkg=$1
+    local current=$2
+    local required=$3
     
     if [ -z "$current" ]; then
         echo "ERROR: $pkg version not found"
