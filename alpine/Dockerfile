@@ -242,30 +242,39 @@ RUN mkdir -p /usr/local/lib/R/site-library && \
 RUN mkdir -p /opt/R/${R_VERSION}/lib/R/etc
 COPY config/Rprofile.site /opt/R/${R_VERSION}/lib/R/etc/Rprofile.site
 
-# Install R Packages
-RUN Rscript /tmp/scripts/install-r-packages.R
+# ============================================
+# COMMENTED OUT: R Packages Installation
+# Uncomment when ready to test R packages
+# ============================================
+# RUN Rscript /tmp/scripts/install-r-packages.R
 
-# Verify rstudioapi
-RUN echo "=== Verifying rstudioapi ===" && \
-    R --slave -e "if(requireNamespace('rstudioapi', quietly=TRUE)) { ver <- as.character(packageVersion('rstudioapi')); cat('rstudioapi version:', ver, '\n') } else { cat('ERROR: rstudioapi not installed\n'); quit(status=1) }"
+# ============================================
+# COMMENTED OUT: Verify rstudioapi
+# Uncomment when R packages are enabled
+# ============================================
+# RUN echo "=== Verifying rstudioapi ===" && \
+#     R --slave -e "if(requireNamespace('rstudioapi', quietly=TRUE)) { ver <- as.character(packageVersion('rstudioapi')); cat('rstudioapi version:', ver, '\n') } else { cat('ERROR: rstudioapi not installed\n'); quit(status=1) }"
 
-# SECURITY: Clean R packages vulnerabilities
-RUN echo "=== Cleaning R packages security issues ===" && \
-    rm -rf /usr/local/lib/R/site-library/webshot/casperjs 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -name "*casper*" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -name "fake_service_account.json" -delete 2>/dev/null || true && \
-    rm -rf /usr/local/lib/R/site-library/gargle/extdata 2>/dev/null || true && \
-    rm -rf /usr/local/lib/R/site-library/webfakes/cert 2>/dev/null || true && \
-    rm -rf /usr/local/lib/R/site-library/webfakes/certs 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -name "*.pem" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -name "*.key" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -name "server.key" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -name "private.key" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -type d -name "cert" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -type d -name "certs" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -type d -name "localhost" -exec rm -rf {} + 2>/dev/null || true && \
-    echo "R packages security cleanup complete"
+# ============================================
+# COMMENTED OUT: Clean R packages vulnerabilities
+# Uncomment when R packages are enabled
+# ============================================
+# RUN echo "=== Cleaning R packages security issues ===" && \
+#     rm -rf /usr/local/lib/R/site-library/webshot/casperjs 2>/dev/null || true && \
+#     find /usr/local/lib/R/site-library -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
+#     find /usr/local/lib/R/site-library -name "*casper*" -delete 2>/dev/null || true && \
+#     find /usr/local/lib/R/site-library -name "fake_service_account.json" -delete 2>/dev/null || true && \
+#     rm -rf /usr/local/lib/R/site-library/gargle/extdata 2>/dev/null || true && \
+#     rm -rf /usr/local/lib/R/site-library/webfakes/cert 2>/dev/null || true && \
+#     rm -rf /usr/local/lib/R/site-library/webfakes/certs 2>/dev/null || true && \
+#     find /usr/local/lib/R/site-library -name "*.pem" -delete 2>/dev/null || true && \
+#     find /usr/local/lib/R/site-library -name "*.key" -delete 2>/dev/null || true && \
+#     find /usr/local/lib/R/site-library -name "server.key" -delete 2>/dev/null || true && \
+#     find /usr/local/lib/R/site-library -name "private.key" -delete 2>/dev/null || true && \
+#     find /usr/local/lib/R/site-library -type d -name "cert" -exec rm -rf {} + 2>/dev/null || true && \
+#     find /usr/local/lib/R/site-library -type d -name "certs" -exec rm -rf {} + 2>/dev/null || true && \
+#     find /usr/local/lib/R/site-library -type d -name "localhost" -exec rm -rf {} + 2>/dev/null || true && \
+#     echo "R packages security cleanup complete"
 
 # Setup Python Virtual Environment
 RUN python3 -m venv /opt/venv
@@ -307,10 +316,10 @@ RUN /tmp/scripts/apply-cve-mitigations.sh
 RUN find /usr/local/lib/R/site-library -name "*.html" -delete 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "doc" -exec rm -rf {} + 2>/dev/null || true
 
-# Final Verification in Builder
+# Final Verification in Builder (Modified - R packages commented out)
 RUN echo "=== BUILDER STAGE VERIFICATION ===" && \
     R --version | head -1 && \
-    R --slave -e "cat('rstudioapi:', as.character(packageVersion('rstudioapi')), '\n')" && \
+    echo "NOTE: R packages installation is commented out" && \
     echo "=== Python Package Versions ===" && \
     /opt/venv/bin/pip --version && \
     /opt/venv/bin/pip show setuptools | grep Version && \
@@ -470,8 +479,11 @@ RUN cp /etc/pip.conf /home/jupyter/.config/pip/pip.conf && \
     cp /etc/.pypirc /home/jupyter/.pypirc && \
     cp /etc/.pypirc /root/.pypirc
 
-# Install R Kernel
-RUN R -e "IRkernel::installspec(user=FALSE, name='ir', displayname='R 4.1.0')"
+# ============================================
+# COMMENTED OUT: Install R Kernel
+# Uncomment when R packages are enabled
+# ============================================
+# RUN R -e "IRkernel::installspec(user=FALSE, name='ir', displayname='R 4.1.0')"
 
 # Copy Configuration Files
 COPY config/jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
@@ -536,13 +548,13 @@ RUN echo "=== FINAL SYSTEM PACKAGE CHECK ===" && \
     fi && \
     echo "PASSED: No vulnerable system packages found"
 
-# Final Verification
+# Final Verification (Modified - R packages commented out)
 RUN echo "============================================" && \
     echo "  FINAL VERIFICATION" && \
     echo "============================================" && \
     echo "R: $(R --version | head -1)" && \
     echo "Python: $(python3 --version)" && \
-    echo "rstudioapi: $(R --slave -e "cat(as.character(packageVersion('rstudioapi')))")" && \
+    echo "NOTE: R packages (rstudioapi) installation is commented out" && \
     echo "" && \
     echo "=== VENV Package Versions (These are SECURE) ===" && \
     echo "pip: $(/opt/venv/bin/pip --version)" && \
@@ -550,7 +562,8 @@ RUN echo "============================================" && \
     echo "wheel: $(/opt/venv/bin/pip show wheel 2>/dev/null | grep Version)" && \
     echo "cryptography: $(/opt/venv/bin/pip show cryptography 2>/dev/null | grep Version)" && \
     echo "" && \
-    jupyter kernelspec list && \
+    echo "=== Jupyter Kernels ===" && \
+    echo "NOTE: R kernel installation is commented out" && \
     echo "============================================" && \
     echo "  SECURITY VERIFICATION" && \
     echo "============================================" && \

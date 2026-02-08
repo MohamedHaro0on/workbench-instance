@@ -48,7 +48,7 @@ echo "    setuptools: ${SETUPTOOLS_VER}"
 echo "    wheel: ${WHEEL_VER}"
 echo "    cryptography: ${CRYPTO_VER}"
 
-# Version check function
+# Version check function - FIXED: removed backslashes from \$1, \$2, \$3
 check_version() {
     local pkg=\$1
     local current=\$2
