@@ -55,7 +55,7 @@ echo "Cleaning up Google Cloud SDK..."
 rm -rf /opt/google-cloud-sdk/.install/.backup 2>/dev/null || true
 rm -rf /opt/google-cloud-sdk/platform/bundledpythonunix 2>/dev/null || true
 find /opt/google-cloud-sdk -name "*.key" -delete 2>/dev/null || true
-find /opt/google-cloud-sdk -name "*.pem" -delete 2>/dev/null || true
+# find /opt/google-cloud-sdk -name "*.pem" -delete 2>/dev/null || true
 find /opt/google-cloud-sdk -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
 find /opt/google-cloud-sdk -type d -name "test" -exec rm -rf {} + 2>/dev/null || true
 

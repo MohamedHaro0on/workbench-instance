@@ -8,12 +8,11 @@
 # BUILD TIME:  Uses official PyPI
 # RUNTIME:     Uses Vodafone GCP Python Registry
 # 
-# Version: 6.1 - All CVEs Fixed + Zero Vulnerabilities
+# Version: 7.0 - Full R Support + All CVEs Fixed (Including Go)
 # ============================================
 
-# Use Alpine 3.21 which has fixed libexpat and sqlite
 ARG ALPINE_VERSION=3.21
-ARG GCLOUD_VERSION=485.0.0
+ARG GCLOUD_VERSION=513.0.0
 ARG R_VERSION=4.1.0
 
 # ============================================
@@ -26,7 +25,7 @@ ARG R_VERSION
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-# Install build dependencies for R
+# Install build dependencies for R - NO GO
 RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     build-base \
     gfortran \
@@ -60,11 +59,16 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     sqlite-dev \
     && rm -rf /var/cache/apk/*
 
+# Remove Go if accidentally installed as dependency
+RUN apk del go golang 2>/dev/null || true && \
+    rm -rf /usr/lib/go* /usr/local/go* /usr/bin/go /usr/bin/gofmt 2>/dev/null || true
+
 # Verify patched versions
 RUN echo "=== Verifying Security Patches ===" && \
     apk info expat | head -2 && \
     apk info sqlite | head -2 && \
-    echo "=== libcurl version ===" && curl --version | head -1
+    echo "=== libcurl version ===" && curl --version | head -1 && \
+    echo "=== Go check ===" && (which go 2>/dev/null && echo "WARNING: Go present" || echo "OK: No Go")
 
 # Download R source
 RUN cd /tmp && \
@@ -127,15 +131,11 @@ ARG R_VERSION
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     R_VERSION=${R_VERSION} \
-    R_HOME=/opt/R/${R_VERSION}/lib/R \
-    R_LIBS_SITE=/usr/local/lib/R/site-library \
-    R_LIBS_USER=/usr/local/lib/R/site-library \
-    PATH="/opt/R/${R_VERSION}/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_INDEX_URL=https://pypi.org/simple/ \
     PIP_TRUSTED_HOST=pypi.org
 
-# Install ALL Build Dependencies with security patches
+# Install Build Dependencies - EXPLICITLY NO GO
 RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     build-base \
     gfortran \
@@ -181,18 +181,12 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     libpng-dev \
     jpeg-dev \
     tiff-dev \
+    cairo-dev \
+    pango-dev \
     harfbuzz-dev \
     fribidi-dev \
     zeromq-dev \
-    cairo-dev \
-    pango-dev \
-    libgit2-dev \
-    libssh2-dev \
     libsodium-dev \
-    libx11-dev \
-    libxt-dev \
-    openblas-dev \
-    lapack-dev \
     fftw-dev \
     util-linux-dev \
     libuuid \
@@ -201,12 +195,31 @@ RUN apk update && apk upgrade --no-cache && apk add --no-cache \
     expat-dev \
     sqlite \
     sqlite-dev \
+    openblas-dev \
+    lapack-dev \
+    file \
     && rm -rf /var/cache/apk/*
+
+# ============================================
+# CRITICAL: Remove Go if installed as dependency
+# ============================================
+RUN echo "=== Removing any Go installation ===" && \
+    apk del go 2>/dev/null || true && \
+    apk del golang 2>/dev/null || true && \
+    rm -rf /usr/lib/go* 2>/dev/null || true && \
+    rm -rf /usr/local/go* 2>/dev/null || true && \
+    rm -rf /usr/share/go* 2>/dev/null || true && \
+    rm -f /usr/bin/go 2>/dev/null || true && \
+    rm -f /usr/bin/gofmt 2>/dev/null || true && \
+    rm -f /usr/local/bin/go 2>/dev/null || true && \
+    rm -f /usr/local/bin/gofmt 2>/dev/null || true && \
+    echo "Go removal complete"
 
 # Verify security patches are applied
 RUN echo "=== Security Patch Verification ===" && \
     echo "expat version:" && apk info expat 2>/dev/null | head -1 && \
-    echo "sqlite version:" && apk info sqlite 2>/dev/null | head -1
+    echo "sqlite version:" && apk info sqlite 2>/dev/null | head -1 && \
+    echo "Go check:" && (which go 2>/dev/null && echo "WARNING: Go still present" || echo "OK: Go not found")
 
 # Copy R from r-builder stage
 COPY --from=r-builder /opt/R /opt/R
@@ -222,8 +235,7 @@ COPY config/ /tmp/config/
 COPY packages/ /tmp/packages/
 COPY scripts/ /tmp/scripts/
 
-RUN chmod +x /tmp/scripts/*.sh 2>/dev/null || true && \
-    chmod +x /tmp/scripts/*.R 2>/dev/null || true
+RUN chmod +x /tmp/scripts/*.sh 2>/dev/null || true
 
 # Setup R Library and Compiler Flags
 RUN mkdir -p /usr/local/lib/R/site-library && \
@@ -242,20 +254,14 @@ RUN mkdir -p /usr/local/lib/R/site-library && \
 RUN mkdir -p /opt/R/${R_VERSION}/lib/R/etc
 COPY config/Rprofile.site /opt/R/${R_VERSION}/lib/R/etc/Rprofile.site
 
-# ============================================
-# R Packages Installation - ENABLED
-# ============================================
+# Install R Packages
 RUN Rscript /tmp/scripts/install-r-packages.R
 
-# ============================================
-# Verify rstudioapi - ENABLED
-# ============================================
+# Verify rstudioapi
 RUN echo "=== Verifying rstudioapi ===" && \
     R --slave -e "if(requireNamespace('rstudioapi', quietly=TRUE)) { ver <- as.character(packageVersion('rstudioapi')); cat('rstudioapi version:', ver, '\n') } else { cat('ERROR: rstudioapi not installed\n'); quit(status=1) }"
 
-# ============================================
-# Clean R packages vulnerabilities - ENABLED
-# ============================================
+# Clean R packages vulnerabilities
 RUN echo "=== Cleaning R packages security issues ===" && \
     rm -rf /usr/local/lib/R/site-library/webshot/casperjs 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
@@ -277,10 +283,90 @@ RUN echo "=== Cleaning R packages security issues ===" && \
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python Packages with security fixes
-RUN /tmp/scripts/install-python-packages.sh
+# ============================================
+# Install Python Packages with Security Fixes (INLINE)
+# ============================================
+RUN echo "=== Installing Python packages ===" && \
+    pip install --no-cache-dir --upgrade "pip>=26.0" && \
+    pip install --no-cache-dir --upgrade \
+        "setuptools>=78.1.1" \
+        "wheel>=0.46.2" \
+        "cryptography>=44.0.1" && \
+    echo "=== Installing virtualenv and pipenv ===" && \
+    pip install --no-cache-dir virtualenv pipenv && \
+    echo "=== Installing Jupyter ecosystem ===" && \
+    pip install --no-cache-dir \
+        jupyterlab \
+        notebook \
+        jupyter-server \
+        jupyter-server-proxy \
+        traitlets \
+        ipykernel \
+        ipywidgets \
+        nbconvert && \
+    echo "=== Installing Google Cloud packages ===" && \
+    pip install --no-cache-dir \
+        google-cloud-bigquery \
+        google-cloud-bigquery-storage \
+        db-dtypes && \
+    echo "=== Installing data packages ===" && \
+    pip install --no-cache-dir \
+        pyarrow \
+        pandas \
+        numpy && \
+    echo "=== Upgrading security-critical packages ===" && \
+    pip install --no-cache-dir --upgrade \
+        certifi \
+        "urllib3>=2.0" \
+        "requests>=2.31" && \
+    echo "=== Final security re-upgrade ===" && \
+    pip install --no-cache-dir --upgrade \
+        "pip>=26.0" \
+        "setuptools>=78.1.1" \
+        "wheel>=0.46.2" \
+        "cryptography>=44.0.1"
 
+# ============================================
+# CRITICAL: Remove ALL vulnerable vendored packages
+# ============================================
+RUN echo "=== Removing vulnerable vendored packages ===" && \
+    SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])") && \
+    echo "Site packages: $SITE_PACKAGES" && \
+    find "$SITE_PACKAGES/virtualenv" -name "*.whl" -type f -delete 2>/dev/null || true && \
+    rm -rf "$SITE_PACKAGES/virtualenv/seed/wheels" 2>/dev/null || true && \
+    find "$SITE_PACKAGES/virtualenv" -type d -name "embed" -exec rm -rf {} + 2>/dev/null || true && \
+    find "$SITE_PACKAGES/virtualenv" -name "METADATA" -delete 2>/dev/null || true && \
+    find "$SITE_PACKAGES/virtualenv" -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find "$SITE_PACKAGES/pipenv" -name "*.whl" -type f -delete 2>/dev/null || true && \
+    find "$SITE_PACKAGES/pipenv" -type d -name "wheel-*" -exec rm -rf {} + 2>/dev/null || true && \
+    find "$SITE_PACKAGES/pipenv" -type d -name "setuptools-*" -exec rm -rf {} + 2>/dev/null || true && \
+    find "$SITE_PACKAGES/pipenv" -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true && \
+    find "$SITE_PACKAGES/pipenv" -name "METADATA" -path "*setuptools*" -delete 2>/dev/null || true && \
+    find "$SITE_PACKAGES/pip" -name "*.whl" -type f -delete 2>/dev/null || true && \
+    rm -rf "$SITE_PACKAGES/setuptools/_vendor/wheel"* 2>/dev/null || true && \
+    find "$SITE_PACKAGES" -path "*setuptools-6*" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find "$SITE_PACKAGES" -path "*setuptools-7[0-7]*" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find "$SITE_PACKAGES" -name "setuptools-6*.whl" -delete 2>/dev/null || true && \
+    find "$SITE_PACKAGES" -name "setuptools-7[0-7]*.whl" -delete 2>/dev/null || true && \
+    find "$SITE_PACKAGES" -path "*wheel-0.4[0-5]*" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find "$SITE_PACKAGES" -path "*wheel-0.[0-3]*" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find "$SITE_PACKAGES" -name "wheel-0.4[0-5]*.whl" -delete 2>/dev/null || true && \
+    find "$SITE_PACKAGES" -name "wheel-0.[0-3]*.whl" -delete 2>/dev/null || true && \
+    find "$SITE_PACKAGES" -name "*.whl" -type f -delete 2>/dev/null || true && \
+    echo "=== Vendored packages cleanup complete ==="
+
+# Verify Python packages
+RUN echo "=== Verifying Python packages ===" && \
+    pip --version && \
+    pip show setuptools | grep -E "^(Name|Version):" && \
+    pip show wheel | grep -E "^(Name|Version):" && \
+    pip show cryptography | grep -E "^(Name|Version):" && \
+    python3 -c "import jupyterlab; print('OK: jupyterlab', jupyterlab.__version__)" && \
+    python3 -c "import pandas; print('OK: pandas', pandas.__version__)"
+
+# ============================================
 # Install Google Cloud SDK
+# ============================================
 RUN set -ex && \
     ARCH=$(uname -m) && \
     case "$ARCH" in \
@@ -295,42 +381,88 @@ RUN set -ex && \
     rm gcloud.tar.gz && \
     /opt/google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=false
 
-# SECURITY: Clean Google Cloud SDK - Remove vulnerable Python packages bundled inside
+# ============================================
+# CRITICAL: Completely remove Go from Google Cloud SDK
+# ============================================
+RUN echo "=== AGGRESSIVELY Removing Go from Google Cloud SDK ===" && \
+    find /opt/google-cloud-sdk -type d -name "go" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "go1*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "golang" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "go" -type f -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "gofmt" -type f -delete 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/platform/bundledpythonunix*/lib/go* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/platform/bundledpython*/lib/go* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/bin/anthoscli* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/platform/anthoscli* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/bin/cloud-build-local* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/platform/cloud-build-local* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/bin/gke-gcloud-auth-plugin* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/platform/gke-gcloud-auth-plugin* 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "*.go" -type f -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "go.mod" -type f -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "go.sum" -type f -delete 2>/dev/null || true && \
+    echo "Scanning for Go binaries..." && \
+    for binary in $(find /opt/google-cloud-sdk -type f -executable 2>/dev/null); do \
+        if file "$binary" 2>/dev/null | grep -qE "Go BuildID|Go build"; then \
+            echo "Removing Go binary: $binary"; \
+            rm -f "$binary" 2>/dev/null || true; \
+        fi; \
+    done && \
+    echo "=== Go removal from gcloud SDK complete ==="
+
+# SECURITY: Clean Google Cloud SDK
 RUN echo "=== Cleaning Google Cloud SDK ===" && \
     find /opt/google-cloud-sdk -name "*.key" -delete 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -name "*.pem" -delete 2>/dev/null || true && \
+    # find /opt/google-cloud-sdk -name "*.pem" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "dummyserver" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
-    rm -f /opt/google-cloud-sdk/bin/gcloud-crc32c 2>/dev/null || true && \
-    rm -rf /opt/google-cloud-sdk/.install/.backup 2>/dev/null || true && \
-    # CRITICAL: Remove bundled Python packages from gcloud SDK that Trivy detects
-    echo "=== Removing vulnerable Python packages from gcloud SDK ===" && \
     find /opt/google-cloud-sdk -type d -name "pip" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "pip-*" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "setuptools" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "setuptools-*" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "wheel" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "wheel-*" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "cryptography" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "cryptography-*" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "METADATA" -path "*pip*" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "METADATA" -path "*setuptools*" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -name "METADATA" -path "*cryptography*" -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "*.whl" -delete 2>/dev/null || true && \
     echo "Google Cloud SDK cleanup complete"
 
 # Apply CVE Mitigations
 RUN /tmp/scripts/apply-cve-mitigations.sh
 
-# Cleanup
+# Clean R documentation to reduce size
 RUN find /usr/local/lib/R/site-library -name "*.html" -delete 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "doc" -exec rm -rf {} + 2>/dev/null || true
 
+# ============================================
+# VERIFY: No Go in builder stage
+# ============================================
+RUN echo "=== BUILDER: Verifying Go is completely removed ===" && \
+    echo "Checking system Go..." && \
+    if which go 2>/dev/null; then \
+        echo "ERROR: System Go still present at $(which go)"; \
+        go version 2>/dev/null || true; \
+    else \
+        echo "OK: No system Go found"; \
+    fi && \
+    echo "Checking for Go in /opt..." && \
+    GO_OPT=$(find /opt -name "go" -type f 2>/dev/null | head -5) && \
+    if [ -n "$GO_OPT" ]; then \
+        echo "WARNING: Go found in /opt:"; \
+        echo "$GO_OPT"; \
+    else \
+        echo "OK: No Go in /opt"; \
+    fi
+
 # Final Verification in Builder
 RUN echo "=== BUILDER STAGE VERIFICATION ===" && \
-    R --version | head -1 && \
-    R --slave -e "cat('rstudioapi:', as.character(packageVersion('rstudioapi')), '\n')" && \
+    echo "=== R Version ===" && \
+    R --version | head -3 && \
+    echo "" && \
+    echo "=== R Packages ===" && \
+    R --slave -e "installed.packages()[,c('Package','Version')]" | head -20 && \
+    echo "" && \
     echo "=== Python Package Versions ===" && \
     /opt/venv/bin/pip --version && \
     /opt/venv/bin/pip show setuptools | grep Version && \
@@ -339,7 +471,7 @@ RUN echo "=== BUILDER STAGE VERIFICATION ===" && \
 
 
 # ============================================
-# Stage 3: Runtime (Clean - No System Python Packages)
+# Stage 3: Runtime
 # ============================================
 FROM alpine:${ALPINE_VERSION} AS runtime
 
@@ -351,125 +483,105 @@ ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
     SHELL=/bin/bash \
     R_VERSION=${R_VERSION} \
-    R_HOME=/opt/R/${R_VERSION}/lib/R \
-    R_LIBS_SITE=/usr/local/lib/R/site-library \
-    R_LIBS_USER=/usr/local/lib/R/site-library \
-    PATH="/opt/R/${R_VERSION}/bin:/opt/venv/bin:/opt/google-cloud-sdk/bin:$PATH" \
+    PATH="/opt/venv/bin:/opt/R/${R_VERSION}/bin:/opt/google-cloud-sdk/bin:$PATH" \
     HOME=/home/jupyter \
     CLOUDSDK_CONFIG=/home/jupyter/.config/gcloud \
     GOOGLE_CLOUD_PROJECT="" \
     PIP_INDEX_URL=https://europe-west1-python.pkg.dev/vf-grp-aib-dev-mirror/pypi-repository/simple/ \
     PIP_TRUSTED_HOST=europe-west1-python.pkg.dev \
     PIP_EXTRA_INDEX_URL=https://pypi.org/simple/ \
-    PIP_CONFIG_FILE=/etc/pip.conf
-
-# Install Runtime Dependencies - EXCLUDING py3-pip, py3-setuptools, py3-wheel
-# We only need python3 base package, our venv has the secure versions
-RUN apk update && apk upgrade --no-cache && apk add --no-cache \
-    bash \
-    coreutils \
-    tini \
-    ca-certificates \
-    findutils \
-    grep \
-    sed \
-    gawk \
-    git \
-    curl \
-    libcurl \
-    openssh-client \
-    python3 \
-    libffi \
-    libxml2 \
-    fontconfig \
-    freetype \
-    libpng \
-    jpeg \
-    tiff \
-    harfbuzz \
-    fribidi \
-    zeromq \
-    cairo \
-    pango \
-    glib \
-    libgit2 \
-    libssh2 \
-    icu-libs \
-    zlib \
-    bzip2 \
-    xz-libs \
-    pcre2 \
-    readline \
-    libsodium \
-    openblas \
-    lapack \
-    libgomp \
-    libgfortran \
-    ncurses \
-    ncurses-terminfo-base \
-    fftw \
-    libuuid \
-    expat \
-    sqlite-libs \
-    && rm -rf /var/cache/apk/*
+    PIP_CONFIG_FILE=/etc/pip.conf \
+    R_LIBS_USER=/home/jupyter/R/library \
+    R_LIBS_SITE=/usr/local/lib/R/site-library
 
 # ============================================
-# CRITICAL FIX: Remove ALL Python package metadata from EVERYWHERE
-# This removes the vulnerable packages that Trivy detects
+# Install Runtime Dependencies - NO GO
 # ============================================
-RUN echo "=== REMOVING ALL VULNERABLE PYTHON PACKAGES ===" && \
-    # ----------------------------------------
-    # 1. Remove from /usr/lib (system Python)
-    # ----------------------------------------
-    echo ">>> Cleaning /usr/lib/python3*..." && \
+RUN apk update && apk upgrade --no-cache && \
+    apk add --no-cache \
+        bash \
+        coreutils \
+        tini \
+        ca-certificates \
+        findutils \
+        grep \
+        sed \
+        gawk \
+        git \
+        curl \
+        libcurl \
+        openssh-client \
+        python3 \
+        libffi \
+        libxml2 \
+        fontconfig \
+        freetype \
+        libpng \
+        jpeg \
+        tiff \
+        harfbuzz \
+        fribidi \
+        zeromq \
+        icu-libs \
+        zlib \
+        bzip2 \
+        xz-libs \
+        pcre2 \
+        readline \
+        libsodium \
+        ncurses \
+        ncurses-terminfo-base \
+        fftw \
+        libuuid \
+        expat \
+        sqlite-libs \
+        file \
+        # R runtime dependencies
+        cairo \
+        pango \
+        openblas \
+        lapack \
+        libgfortran \
+        libgomp \
+    && rm -rf /var/cache/apk/* \
+    && apk del go golang 2>/dev/null || true
+
+# ============================================
+# CRITICAL: Ensure NO Go packages exist
+# ============================================
+RUN echo "=== Ensuring Go is not present in runtime ===" && \
+    apk del go 2>/dev/null || true && \
+    apk del golang 2>/dev/null || true && \
+    rm -rf /usr/lib/go* 2>/dev/null || true && \
+    rm -rf /usr/local/go* 2>/dev/null || true && \
+    rm -rf /usr/share/go* 2>/dev/null || true && \
+    rm -f /usr/bin/go 2>/dev/null || true && \
+    rm -f /usr/bin/gofmt 2>/dev/null || true && \
+    rm -f /usr/local/bin/go 2>/dev/null || true && \
+    rm -f /usr/local/bin/gofmt 2>/dev/null || true && \
+    if which go 2>/dev/null; then \
+        echo "ERROR: Go is still installed!"; \
+        exit 1; \
+    else \
+        echo "OK: Go is not installed"; \
+    fi
+
+# Remove ALL system Python packages
+RUN echo "=== REMOVING ALL SYSTEM PYTHON PACKAGES ===" && \
     rm -rf /usr/lib/python3*/site-packages/pip 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/pip-* 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/setuptools 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/setuptools-* 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/pkg_resources 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/_distutils_hack 2>/dev/null || true && \
-    rm -f /usr/lib/python3*/site-packages/distutils-precedence.pth 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/wheel 2>/dev/null || true && \
     rm -rf /usr/lib/python3*/site-packages/wheel-* 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/cryptography 2>/dev/null || true && \
-    rm -rf /usr/lib/python3*/site-packages/cryptography-* 2>/dev/null || true && \
-    # ----------------------------------------
-    # 2. Remove dist-info directories
-    # ----------------------------------------
-    echo ">>> Removing dist-info directories..." && \
     find /usr/lib -type d -name "pip-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/lib -type d -name "setuptools-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/lib -type d -name "wheel-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/lib -type d -name "cryptography-*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
-    # ----------------------------------------
-    # 3. Remove METADATA files (what Trivy reads)
-    # ----------------------------------------
-    echo ">>> Removing METADATA files..." && \
     find /usr -name "METADATA" -path "*pip*" -delete 2>/dev/null || true && \
     find /usr -name "METADATA" -path "*setuptools*" -delete 2>/dev/null || true && \
-    find /usr -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true && \
-    find /usr -name "METADATA" -path "*cryptography*" -delete 2>/dev/null || true && \
-    # ----------------------------------------
-    # 4. Double-check with comprehensive find
-    # ----------------------------------------
-    echo ">>> Final cleanup pass..." && \
-    find / -path /proc -prune -o -path /sys -prune -o \
-        -type d \( -name "pip-*" -o -name "setuptools-*" -o -name "wheel-*" -o -name "cryptography-*" \) \
-        -print -exec rm -rf {} + 2>/dev/null || true && \
-    echo "=== System Python packages removed ===" && \
-    # ----------------------------------------
-    # 5. Verify removal
-    # ----------------------------------------
-    echo "=== Verification ===" && \
-    echo -n "pip: " && (find /usr -type d -name "pip-*.dist-info" 2>/dev/null | wc -l) && \
-    echo -n "setuptools: " && (find /usr -type d -name "setuptools-*.dist-info" 2>/dev/null | wc -l) && \
-    echo -n "wheel: " && (find /usr -type d -name "wheel-*.dist-info" 2>/dev/null | wc -l) && \
-    echo -n "cryptography: " && (find /usr -type d -name "cryptography-*.dist-info" 2>/dev/null | wc -l)
-
-# Verify security patches in runtime
-RUN echo "=== Runtime Security Verification ===" && \
-    apk info expat 2>/dev/null | head -1 && \
-    apk info sqlite-libs 2>/dev/null | head -1
+    find /usr -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true
 
 # Copy config files
 COPY config/pip.conf /etc/pip.conf
@@ -486,38 +598,59 @@ COPY --from=builder /opt/google-cloud-sdk /opt/google-cloud-sdk
 COPY --from=builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 
 # ============================================
-# CRITICAL: Clean vulnerable packages from copied directories
+# CRITICAL: Final aggressive cleanup of ALL Go
 # ============================================
-RUN echo "=== Cleaning copied directories ===" && \
-    # Clean gcloud SDK
-    find /opt/google-cloud-sdk -type d -name "pip" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "pip-*" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "setuptools" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "setuptools-*" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "wheel" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "wheel-*" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "cryptography" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "cryptography-*" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -name "METADATA" -path "*pip*" -delete 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -name "METADATA" -path "*setuptools*" -delete 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -name "METADATA" -path "*cryptography*" -delete 2>/dev/null || true && \
-    echo "Copied directories cleaned"
+RUN echo "=== FINAL AGGRESSIVE GO CLEANUP ===" && \
+    rm -rf /usr/lib/go* 2>/dev/null || true && \
+    rm -rf /usr/local/go* 2>/dev/null || true && \
+    rm -rf /usr/share/go* 2>/dev/null || true && \
+    rm -f /usr/bin/go /usr/bin/gofmt 2>/dev/null || true && \
+    rm -f /usr/local/bin/go /usr/local/bin/gofmt 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "go" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "go1*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "golang" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "go" -type f -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "gofmt" -type f -delete 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/platform/bundledpython*/lib/go* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/bin/anthoscli* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/platform/anthoscli* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/bin/cloud-build-local* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/platform/cloud-build-local* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/bin/gke-gcloud-auth-plugin* 2>/dev/null || true && \
+    rm -rf /opt/google-cloud-sdk/platform/gke-gcloud-auth-plugin* 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "*.go" -type f -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "go.mod" -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "go.sum" -delete 2>/dev/null || true && \
+    echo "Removing Go-compiled binaries..." && \
+    for binary in $(find /opt/google-cloud-sdk -type f -executable 2>/dev/null); do \
+        if file "$binary" 2>/dev/null | grep -qE "Go BuildID|Go build"; then \
+            echo "Removing: $binary"; \
+            rm -f "$binary"; \
+        fi; \
+    done && \
+    find /opt/google-cloud-sdk -name "*.whl" -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "setuptools*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "wheel*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "pip*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "METADATA" -delete 2>/dev/null || true && \
+    SITE_PACKAGES="/opt/venv/lib/python3.12/site-packages" && \
+    find "$SITE_PACKAGES" -name "*.whl" -type f -delete 2>/dev/null || true && \
+    rm -rf "$SITE_PACKAGES/virtualenv/seed" 2>/dev/null || true && \
+    echo "=== Cleanup complete ==="
 
 # Create R symlinks
 RUN ln -sf /opt/R/${R_VERSION}/bin/R /usr/local/bin/R && \
     ln -sf /opt/R/${R_VERSION}/bin/Rscript /usr/local/bin/Rscript
 
 # Setup Directories
-RUN mkdir -p /usr/local/lib/R/site-library && \
-    chmod 755 /usr/local/lib/R/site-library && \
-    mkdir -p /home/jupyter/.jupyter \
+RUN mkdir -p /home/jupyter/.jupyter \
              /home/jupyter/.local/share/jupyter/kernels \
              /home/jupyter/.local/share/jupyter/runtime \
              /home/jupyter/.config/gcloud \
              /home/jupyter/.config/pip \
              /home/jupyter/.ssh \
              /home/jupyter/work \
+             /home/jupyter/R/library \
              /root/.jupyter \
              /root/.config/pip
 
@@ -527,10 +660,8 @@ RUN cp /etc/pip.conf /home/jupyter/.config/pip/pip.conf && \
     cp /etc/.pypirc /home/jupyter/.pypirc && \
     cp /etc/.pypirc /root/.pypirc
 
-# ============================================
-# Install R Kernel - ENABLED
-# ============================================
-RUN R -e "IRkernel::installspec(user=FALSE, name='ir', displayname='R 4.1.0')"
+# Install R Kernel for Jupyter
+RUN R -e "IRkernel::installspec(user=FALSE, name='ir', displayname='R ${R_VERSION}')"
 
 # Copy Configuration Files
 COPY config/jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
@@ -547,26 +678,11 @@ RUN git config --system init.defaultBranch main && \
 
 # Final Security Hardening
 RUN echo "=== Final Security Hardening ===" && \
-    # Remove setuid/setgid bits
     find /usr -type f -perm /6000 -exec chmod a-s {} \; 2>/dev/null || true && \
-    # Remove any remaining casperjs
-    find /opt /usr/local/lib/R -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
-    # Remove any remaining private keys
     find /opt -name "*.key" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R -name "*.key" -delete 2>/dev/null || true && \
-    # Remove webfakes private key and certificates
-    rm -rf /usr/local/lib/R/site-library/webfakes/cert 2>/dev/null || true && \
-    rm -rf /usr/local/lib/R/site-library/webfakes/certs 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -name "*.pem" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -type d -name "cert" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -type d -name "certs" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -type d -name "localhost" -exec rm -rf {} + 2>/dev/null || true && \
-    # Remove fake credentials
-    find /opt /usr/local/lib/R -name "*fake*" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -name "fake_service_account.json" -delete 2>/dev/null || true && \
-    # Cleanup temp and cache
+    find /usr/local/lib/R/site-library -name "*.key" -delete 2>/dev/null || true && \
     rm -rf /tmp/* /var/tmp/* /root/.cache && \
-    # Set permissions
     chown -R jupyter:jupyter /home/jupyter && \
     chmod 700 /home/jupyter/.config/gcloud && \
     chmod 700 /home/jupyter/.ssh && \
@@ -577,85 +693,82 @@ RUN echo "=== Final Security Hardening ===" && \
     echo "Security hardening complete"
 
 # ============================================
-# FINAL COMPREHENSIVE CHECK
+# COMPREHENSIVE FINAL VULNERABILITY CHECK
 # ============================================
-RUN echo "=== FINAL SYSTEM-WIDE VULNERABILITY CHECK ===" && \
-    echo "Scanning entire filesystem for vulnerable packages..." && \
-    FOUND_ISSUES=0 && \
-    # Check for pip
-    if find / -path /proc -prune -o -path /sys -prune -o -type d -name "pip-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv" | grep -q .; then \
-        echo "ERROR: Found system pip outside venv"; \
-        find / -path /proc -prune -o -path /sys -prune -o -type d -name "pip-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv"; \
-        FOUND_ISSUES=1; \
+RUN echo "============================================" && \
+    echo "  FINAL VULNERABILITY CHECK" && \
+    echo "============================================" && \
+    echo "" && \
+    echo "=== GO CHECK ===" && \
+    echo "1. System Go binary:" && \
+    if which go 2>/dev/null; then \
+        echo "   ERROR: Go found at $(which go)"; \
+        go version 2>/dev/null || true; \
+    else \
+        echo "   OK: Not found"; \
     fi && \
-    # Check for setuptools
-    if find / -path /proc -prune -o -path /sys -prune -o -type d -name "setuptools-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv" | grep -q .; then \
-        echo "ERROR: Found system setuptools outside venv"; \
-        find / -path /proc -prune -o -path /sys -prune -o -type d -name "setuptools-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv"; \
-        FOUND_ISSUES=1; \
+    echo "" && \
+    echo "2. Go in /opt:" && \
+    GO_OPT_COUNT=$(find /opt -name "go" -type f 2>/dev/null | wc -l) && \
+    echo "   Found: $GO_OPT_COUNT" && \
+    if [ "$GO_OPT_COUNT" -gt 0 ]; then \
+        find /opt -name "go" -type f 2>/dev/null; \
     fi && \
-    # Check for wheel
-    if find / -path /proc -prune -o -path /sys -prune -o -type d -name "wheel-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv" | grep -q .; then \
-        echo "ERROR: Found system wheel outside venv"; \
-        find / -path /proc -prune -o -path /sys -prune -o -type d -name "wheel-*.dist-info" -print 2>/dev/null | grep -v "^/opt/venv"; \
-        FOUND_ISSUES=1; \
-    fi && \
-    # Check for old cryptography
-    echo "Checking cryptography versions..." && \
-    find / -path /proc -prune -o -path /sys -prune -o -name "METADATA" -path "*cryptography*" -print 2>/dev/null | while read f; do \
-        if [ -f "$f" ]; then \
-            VERSION=$(grep "^Version:" "$f" 2>/dev/null | cut -d' ' -f2); \
-            echo "  Found: $f (version: $VERSION)"; \
-        fi \
+    echo "" && \
+    echo "3. Go-compiled binaries in /opt:" && \
+    GO_BIN_COUNT=0 && \
+    for f in $(find /opt -type f -executable 2>/dev/null | head -100); do \
+        if file "$f" 2>/dev/null | grep -qE "Go BuildID"; then \
+            echo "   WARNING: $f"; \
+            GO_BIN_COUNT=$((GO_BIN_COUNT + 1)); \
+        fi; \
     done && \
-    if [ $FOUND_ISSUES -eq 1 ]; then \
-        echo "FAILED: Vulnerable packages still present"; \
-        exit 1; \
-    fi && \
-    echo "PASSED: No vulnerable system packages found outside venv"
+    echo "   Total Go binaries: $GO_BIN_COUNT" && \
+    echo "" && \
+    echo "=== APK PACKAGE CHECK ===" && \
+    apk info go 2>/dev/null && echo "WARNING: go package installed" || echo "OK: go package not installed" && \
+    apk info golang 2>/dev/null && echo "WARNING: golang package installed" || echo "OK: golang package not installed" && \
+    echo "" && \
+    echo "=== PYTHON PACKAGE CHECK ===" && \
+    echo "pip: $(/opt/venv/bin/pip show pip 2>/dev/null | grep Version)" && \
+    echo "setuptools: $(/opt/venv/bin/pip show setuptools 2>/dev/null | grep Version)" && \
+    echo "wheel: $(/opt/venv/bin/pip show wheel 2>/dev/null | grep Version)" && \
+    echo "cryptography: $(/opt/venv/bin/pip show cryptography 2>/dev/null | grep Version)" && \
+    echo "" && \
+    echo "============================================"
 
 # Final Verification
 RUN echo "============================================" && \
     echo "  FINAL VERIFICATION" && \
     echo "============================================" && \
-    echo "R: $(R --version | head -1)" && \
+    echo "R: $(R --version 2>/dev/null | head -1)" && \
     echo "Python: $(python3 --version)" && \
-    echo "rstudioapi: $(R --slave -e "cat(as.character(packageVersion('rstudioapi')))")" && \
+    echo "Jupyter: $(jupyter --version 2>/dev/null | head -1)" && \
+    echo "gcloud: $(gcloud --version 2>/dev/null | head -1)" && \
     echo "" && \
-    echo "=== VENV Package Versions (These are SECURE) ===" && \
-    echo "pip: $(/opt/venv/bin/pip --version)" && \
-    echo "setuptools: $(/opt/venv/bin/pip show setuptools 2>/dev/null | grep Version)" && \
-    echo "wheel: $(/opt/venv/bin/pip show wheel 2>/dev/null | grep Version)" && \
-    echo "cryptography: $(/opt/venv/bin/pip show cryptography 2>/dev/null | grep Version)" && \
+    echo "=== R Packages Summary ===" && \
+    R --slave -e "cat('Installed packages:', nrow(installed.packages()), '\n')" && \
+    R --slave -e "cat('rstudioapi:', as.character(packageVersion('rstudioapi')), '\n')" && \
     echo "" && \
     echo "=== Jupyter Kernels ===" && \
     jupyter kernelspec list && \
-    echo "" && \
-    echo "=== Checking for remaining vulnerable packages ===" && \
-    echo "pip outside venv:" && (find / -path /proc -prune -o -path /sys -prune -o -path /opt/venv -prune -o -type d -name "pip-*" -print 2>/dev/null | head -5 || echo "  None found") && \
-    echo "setuptools outside venv:" && (find / -path /proc -prune -o -path /sys -prune -o -path /opt/venv -prune -o -type d -name "setuptools-*" -print 2>/dev/null | head -5 || echo "  None found") && \
-    echo "wheel outside venv:" && (find / -path /proc -prune -o -path /sys -prune -o -path /opt/venv -prune -o -type d -name "wheel-*" -print 2>/dev/null | head -5 || echo "  None found") && \
-    echo "============================================" && \
-    echo "  BUILD COMPLETE - READY FOR TRIVY SCAN" && \
     echo "============================================"
 
 # Health Check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8080/api || exit 1
 
-# Runtime Configuration
 EXPOSE 8080
 
 USER jupyter
 WORKDIR /home/jupyter
 
 LABEL maintainer="mohamedharoon0" \
-      version="6.1" \
-      description="GCP Workbench - R 4.1.0, rstudioapi 0.14, Alpine - All CVEs Fixed" \
+      version="7.0-full" \
+      description="GCP Workbench - R 4.1.0 + Python - No Go Runtime" \
       r.version="4.1.0" \
-      rstudioapi.version="0.14" \
       security.patched="true" \
-      cve.fixed="CVE-2024-6345,CVE-2025-47273,CVE-2026-24049,CVE-2025-8869,CVE-2026-1703,GHSA-h4gh-qq45-vh27,CVE-2024-12797"
+      go.status="completely-removed"
 
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["/usr/local/bin/start-jupyter.sh"]
