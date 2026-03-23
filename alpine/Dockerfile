@@ -261,7 +261,7 @@ RUN Rscript /tmp/scripts/install-r-packages.R
 RUN echo "=== Verifying rstudioapi ===" && \
     R --slave -e "if(requireNamespace('rstudioapi', quietly=TRUE)) { ver <- as.character(packageVersion('rstudioapi')); cat('rstudioapi version:', ver, '\n') } else { cat('ERROR: rstudioapi not installed\n'); quit(status=1) }"
 
-# Clean R packages vulnerabilities
+# # Clean R packages vulnerabilities
 RUN echo "=== Cleaning R packages security issues ===" && \
     rm -rf /usr/local/lib/R/site-library/webshot/casperjs 2>/dev/null || true && \
     find /usr/local/lib/R/site-library -type d -name "casperjs" -exec rm -rf {} + 2>/dev/null || true && \
@@ -413,9 +413,20 @@ RUN echo "=== AGGRESSIVELY Removing Go from Google Cloud SDK ===" && \
 # SECURITY: Clean Google Cloud SDK
 RUN echo "=== Cleaning Google Cloud SDK ===" && \
     find /opt/google-cloud-sdk -name "*.key" -delete 2>/dev/null || true && \
-    # find /opt/google-cloud-sdk -name "*.pem" -delete 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "dummyserver" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "dummyserver" \
+        ! -path "*/gslib/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
+    \
+    # CRITICAL FIX: preserve gslib/tests - gsutil needs it at runtime
+    # Only remove test dirs that are NOT inside gslib
+    find /opt/google-cloud-sdk -type d -name "tests" \
+        ! -path "*/gslib/tests*" \
+        ! -path "*/gslib/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "test" \
+        ! -path "*/gslib/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
+    \
     find /opt/google-cloud-sdk -type d -name "pip" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "pip-*" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "setuptools" -exec rm -rf {} + 2>/dev/null || true && \
@@ -426,8 +437,11 @@ RUN echo "=== Cleaning Google Cloud SDK ===" && \
     find /opt/google-cloud-sdk -name "METADATA" -path "*setuptools*" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "*.whl" -delete 2>/dev/null || true && \
+    \
+    # Verify gsutil is functional after cleanup
+    echo "Verifying gsutil after cleanup..." && \
+    python3 /opt/google-cloud-sdk/platform/gsutil/gsutil version && \
     echo "Google Cloud SDK cleanup complete"
-
 # Apply CVE Mitigations
 RUN /tmp/scripts/apply-cve-mitigations.sh
 
@@ -660,8 +674,8 @@ RUN cp /etc/pip.conf /home/jupyter/.config/pip/pip.conf && \
     cp /etc/.pypirc /home/jupyter/.pypirc && \
     cp /etc/.pypirc /root/.pypirc
 
-# Install R Kernel for Jupyter
-RUN R -e "IRkernel::installspec(user=FALSE, name='ir', displayname='R ${R_VERSION}')"
+# # Install R Kernel for Jupyter
+# RUN R -e "IRkernel::installspec(user=FALSE, name='ir', displayname='R ${R_VERSION}')"
 
 # Copy Configuration Files
 COPY config/jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
@@ -741,7 +755,7 @@ RUN echo "============================================" && \
 RUN echo "============================================" && \
     echo "  FINAL VERIFICATION" && \
     echo "============================================" && \
-    echo "R: $(R --version 2>/dev/null | head -1)" && \
+    # echo "R: $(R --version 2>/dev/null | head -1)" && \
     echo "Python: $(python3 --version)" && \
     echo "Jupyter: $(jupyter --version 2>/dev/null | head -1)" && \
     echo "gcloud: $(gcloud --version 2>/dev/null | head -1)" && \

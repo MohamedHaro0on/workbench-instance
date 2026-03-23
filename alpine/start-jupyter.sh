@@ -49,6 +49,13 @@ else
     echo "WARNING: Python kernel not found!"
 fi
 
+echo "Verifying gsutil..."
+if gsutil version > /dev/null 2>&1; then
+    echo "gsutil: OK ($(gsutil version 2>&1 | head -1))"
+else
+    echo "WARNING: gsutil is not functional"
+fi
+
 echo "============================================"
 echo "Starting Jupyter Lab on port 8080..."
 echo "============================================"
