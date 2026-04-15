@@ -8,7 +8,7 @@
 # BUILD TIME:  Uses official PyPI
 # RUNTIME:     Uses Vodafone GCP Python Registry
 # 
-# Version: 7.0 - Full R Support + All CVEs Fixed (Including Go)
+# Version: 7.2 - Full R Support + gsutil + All CVEs Fixed
 # ============================================
 
 ARG ALPINE_VERSION=3.21
@@ -291,7 +291,7 @@ RUN echo "=== Installing Python packages ===" && \
     pip install --no-cache-dir --upgrade \
         "setuptools>=78.1.1" \
         "wheel>=0.46.2" \
-        "cryptography>=44.0.1" && \
+        "cryptography>=46.0.7" && \
     echo "=== Installing virtualenv and pipenv ===" && \
     pip install --no-cache-dir virtualenv pipenv && \
     echo "=== Installing Jupyter ecosystem ===" && \
@@ -318,13 +318,18 @@ RUN echo "=== Installing Python packages ===" && \
     pip install --no-cache-dir --upgrade \
         certifi \
         "urllib3>=2.0" \
-        "requests>=2.31" && \
+        "requests>=2.33.0" \
+        "aiohttp>=3.13.4" \
+        "Pygments>=2.20.0" && \
     echo "=== Final security re-upgrade ===" && \
     pip install --no-cache-dir --upgrade \
         "pip>=26.0" \
         "setuptools>=78.1.1" \
         "wheel>=0.46.2" \
-        "cryptography>=44.0.1"
+        "cryptography>=46.0.7" \
+        "requests>=2.33.0" \
+        "aiohttp>=3.13.4" \
+        "Pygments>=2.20.0"
 
 # ============================================
 # CRITICAL: Remove ALL vulnerable vendored packages
@@ -361,11 +366,14 @@ RUN echo "=== Verifying Python packages ===" && \
     pip show setuptools | grep -E "^(Name|Version):" && \
     pip show wheel | grep -E "^(Name|Version):" && \
     pip show cryptography | grep -E "^(Name|Version):" && \
+    pip show aiohttp | grep -E "^(Name|Version):" && \
+    pip show Pygments | grep -E "^(Name|Version):" && \
+    pip show requests | grep -E "^(Name|Version):" && \
     python3 -c "import jupyterlab; print('OK: jupyterlab', jupyterlab.__version__)" && \
     python3 -c "import pandas; print('OK: pandas', pandas.__version__)"
 
 # ============================================
-# Install Google Cloud SDK
+# Install Google Cloud SDK + gsutil
 # ============================================
 RUN set -ex && \
     ARCH=$(uname -m) && \
@@ -379,16 +387,25 @@ RUN set -ex && \
         "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-${GCLOUD_VERSION}-linux-${GCLOUD_ARCH}.tar.gz" && \
     tar -xzf gcloud.tar.gz -C /opt/ && \
     rm gcloud.tar.gz && \
-    /opt/google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=false
+    /opt/google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=false && \
+    ln -sf /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud && \
+    ln -sf /opt/google-cloud-sdk/bin/gsutil /usr/local/bin/gsutil && \
+    ln -sf /opt/google-cloud-sdk/bin/bq /usr/local/bin/bq
 
 # ============================================
 # CRITICAL: Completely remove Go from Google Cloud SDK
 # ============================================
 RUN echo "=== AGGRESSIVELY Removing Go from Google Cloud SDK ===" && \
-    find /opt/google-cloud-sdk -type d -name "go" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "go" \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "go1*" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "golang" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -name "go" -type f -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "go" -type f \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "gofmt" -type f -delete 2>/dev/null || true && \
     rm -rf /opt/google-cloud-sdk/platform/bundledpythonunix*/lib/go* 2>/dev/null || true && \
     rm -rf /opt/google-cloud-sdk/platform/bundledpython*/lib/go* 2>/dev/null || true && \
@@ -410,7 +427,7 @@ RUN echo "=== AGGRESSIVELY Removing Go from Google Cloud SDK ===" && \
     done && \
     echo "=== Go removal from gcloud SDK complete ==="
 
-# SECURITY: Clean Google Cloud SDK
+# SECURITY: Clean Google Cloud SDK (preserve gsutil/gslib)
 RUN echo "=== Cleaning Google Cloud SDK ===" && \
     find /opt/google-cloud-sdk -name "*.key" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "dummyserver" \
@@ -418,36 +435,52 @@ RUN echo "=== Cleaning Google Cloud SDK ===" && \
         -exec rm -rf {} + 2>/dev/null || true && \
     \
     # CRITICAL FIX: preserve gslib/tests - gsutil needs it at runtime
-    # Only remove test dirs that are NOT inside gslib
     find /opt/google-cloud-sdk -type d -name "tests" \
         ! -path "*/gslib/tests*" \
         ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
         -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "test" \
         ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
         -exec rm -rf {} + 2>/dev/null || true && \
     \
-    find /opt/google-cloud-sdk -type d -name "pip" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "pip" \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "pip-*" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "setuptools" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "setuptools" \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "setuptools-*" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "wheel" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "wheel" \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "wheel-*" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "METADATA" -path "*pip*" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "METADATA" -path "*setuptools*" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "METADATA" -path "*wheel*" -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "*.whl" -delete 2>/dev/null || true && \
     \
+    # Remove bundled python (use system python instead)
+    rm -rf /opt/google-cloud-sdk/.install/.backup 2>/dev/null || true && \
+    # rm -rf /opt/google-cloud-sdk/platform/bundledpythonunix 2>/dev/null || true && \
+    \
     # Verify gsutil is functional after cleanup
     echo "Verifying gsutil after cleanup..." && \
     python3 /opt/google-cloud-sdk/platform/gsutil/gsutil version && \
+    gsutil version && \
     echo "Google Cloud SDK cleanup complete"
+
 # Apply CVE Mitigations
 RUN /tmp/scripts/apply-cve-mitigations.sh
 
 # Clean R documentation to reduce size
 RUN find /usr/local/lib/R/site-library -name "*.html" -delete 2>/dev/null || true && \
-    find /usr/local/lib/R/site-library -type d -name "doc" -exec rm -rf {} + 2>/dev/null || true
+    find /usr/local/lib/R/site-library -type d -name "doc" -exec rm -rf {} + fVOLUME /home/jupyter2>/dev/null || true
 
 # ============================================
 # VERIFY: No Go in builder stage
@@ -481,7 +514,12 @@ RUN echo "=== BUILDER STAGE VERIFICATION ===" && \
     /opt/venv/bin/pip --version && \
     /opt/venv/bin/pip show setuptools | grep Version && \
     /opt/venv/bin/pip show wheel | grep Version && \
-    /opt/venv/bin/pip show cryptography | grep Version
+    /opt/venv/bin/pip show cryptography | grep Version && \
+    echo "" && \
+    echo "=== gsutil ===" && \
+    gsutil version && \
+    echo "=== gcloud ===" && \
+    gcloud --version | head -1
 
 
 # ============================================
@@ -561,6 +599,19 @@ RUN apk update && apk upgrade --no-cache && \
     && apk del go golang 2>/dev/null || true
 
 # ============================================
+# CRITICAL: Force upgrade CVE-affected Alpine packages
+# ============================================
+RUN apk update && apk upgrade --no-cache \
+    expat \
+    libexpat \
+    libcrypto3 \
+    libssl3 \
+    libpng \
+    musl \
+    musl-utils \
+    && rm -rf /var/cache/apk/*
+
+# ============================================
 # CRITICAL: Ensure NO Go packages exist
 # ============================================
 RUN echo "=== Ensuring Go is not present in runtime ===" && \
@@ -620,10 +671,16 @@ RUN echo "=== FINAL AGGRESSIVE GO CLEANUP ===" && \
     rm -rf /usr/share/go* 2>/dev/null || true && \
     rm -f /usr/bin/go /usr/bin/gofmt 2>/dev/null || true && \
     rm -f /usr/local/bin/go /usr/local/bin/gofmt 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "go" -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "go" \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "go1*" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/google-cloud-sdk -type d -name "golang" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -name "go" -type f -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "go" -type f \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -delete 2>/dev/null || true && \
     find /opt/google-cloud-sdk -name "gofmt" -type f -delete 2>/dev/null || true && \
     rm -rf /opt/google-cloud-sdk/platform/bundledpython*/lib/go* 2>/dev/null || true && \
     rm -rf /opt/google-cloud-sdk/bin/anthoscli* 2>/dev/null || true && \
@@ -643,10 +700,22 @@ RUN echo "=== FINAL AGGRESSIVE GO CLEANUP ===" && \
         fi; \
     done && \
     find /opt/google-cloud-sdk -name "*.whl" -delete 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "setuptools*" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "wheel*" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -type d -name "pip*" -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/google-cloud-sdk -name "METADATA" -delete 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "setuptools*" \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "wheel*" \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -type d -name "pip*" \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/google-cloud-sdk -name "METADATA" \
+        ! -path "*/gslib/*" \
+        ! -path "*/gsutil/*" \
+        -delete 2>/dev/null || true && \
     SITE_PACKAGES="/opt/venv/lib/python3.12/site-packages" && \
     find "$SITE_PACKAGES" -name "*.whl" -type f -delete 2>/dev/null || true && \
     rm -rf "$SITE_PACKAGES/virtualenv/seed" 2>/dev/null || true && \
@@ -655,6 +724,11 @@ RUN echo "=== FINAL AGGRESSIVE GO CLEANUP ===" && \
 # Create R symlinks
 RUN ln -sf /opt/R/${R_VERSION}/bin/R /usr/local/bin/R && \
     ln -sf /opt/R/${R_VERSION}/bin/Rscript /usr/local/bin/Rscript
+
+# Create gcloud/gsutil/bq symlinks
+RUN ln -sf /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud && \
+    ln -sf /opt/google-cloud-sdk/bin/gsutil /usr/local/bin/gsutil && \
+    ln -sf /opt/google-cloud-sdk/bin/bq /usr/local/bin/bq
 
 # Setup Directories
 RUN mkdir -p /home/jupyter/.jupyter \
@@ -674,8 +748,8 @@ RUN cp /etc/pip.conf /home/jupyter/.config/pip/pip.conf && \
     cp /etc/.pypirc /home/jupyter/.pypirc && \
     cp /etc/.pypirc /root/.pypirc
 
-# # Install R Kernel for Jupyter
-# RUN R -e "IRkernel::installspec(user=FALSE, name='ir', displayname='R ${R_VERSION}')"
+# Install R Kernel for Jupyter
+RUN R -e "IRkernel::installspec(user=FALSE, name='ir', displayname='R ${R_VERSION}')"
 
 # Copy Configuration Files
 COPY config/jupyter_server_config.py /home/jupyter/.jupyter/jupyter_server_config.py
@@ -743,11 +817,23 @@ RUN echo "============================================" && \
     apk info go 2>/dev/null && echo "WARNING: go package installed" || echo "OK: go package not installed" && \
     apk info golang 2>/dev/null && echo "WARNING: golang package installed" || echo "OK: golang package not installed" && \
     echo "" && \
+    echo "=== CVE-AFFECTED PACKAGE VERSIONS ===" && \
+    echo "expat: $(apk info expat 2>/dev/null | head -1)" && \
+    echo "libexpat: $(apk info libexpat 2>/dev/null | head -1)" && \
+    echo "libcrypto3: $(apk info libcrypto3 2>/dev/null | head -1)" && \
+    echo "libssl3: $(apk info libssl3 2>/dev/null | head -1)" && \
+    echo "libpng: $(apk info libpng 2>/dev/null | head -1)" && \
+    echo "musl: $(apk info musl 2>/dev/null | head -1)" && \
+    echo "musl-utils: $(apk info musl-utils 2>/dev/null | head -1)" && \
+    echo "" && \
     echo "=== PYTHON PACKAGE CHECK ===" && \
     echo "pip: $(/opt/venv/bin/pip show pip 2>/dev/null | grep Version)" && \
     echo "setuptools: $(/opt/venv/bin/pip show setuptools 2>/dev/null | grep Version)" && \
     echo "wheel: $(/opt/venv/bin/pip show wheel 2>/dev/null | grep Version)" && \
     echo "cryptography: $(/opt/venv/bin/pip show cryptography 2>/dev/null | grep Version)" && \
+    echo "aiohttp: $(/opt/venv/bin/pip show aiohttp 2>/dev/null | grep Version)" && \
+    echo "Pygments: $(/opt/venv/bin/pip show Pygments 2>/dev/null | grep Version)" && \
+    echo "requests: $(/opt/venv/bin/pip show requests 2>/dev/null | grep Version)" && \
     echo "" && \
     echo "============================================"
 
@@ -755,10 +841,12 @@ RUN echo "============================================" && \
 RUN echo "============================================" && \
     echo "  FINAL VERIFICATION" && \
     echo "============================================" && \
-    # echo "R: $(R --version 2>/dev/null | head -1)" && \
+    echo "R: $(R --version 2>/dev/null | head -1)" && \
     echo "Python: $(python3 --version)" && \
     echo "Jupyter: $(jupyter --version 2>/dev/null | head -1)" && \
     echo "gcloud: $(gcloud --version 2>/dev/null | head -1)" && \
+    echo "gsutil: $(gsutil version 2>/dev/null)" && \
+    echo "bq: $(bq version 2>/dev/null | head -1)" && \
     echo "" && \
     echo "=== R Packages Summary ===" && \
     R --slave -e "cat('Installed packages:', nrow(installed.packages()), '\n')" && \
@@ -771,6 +859,9 @@ RUN echo "============================================" && \
 # Health Check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8080/api || exit 1
+    
+
+VOLUME /home/jupyter
 
 EXPOSE 8080
 
@@ -778,8 +869,8 @@ USER jupyter
 WORKDIR /home/jupyter
 
 LABEL maintainer="mohamedharoon0" \
-      version="7.0-full" \
-      description="GCP Workbench - R 4.1.0 + Python - No Go Runtime" \
+      version="7.2-full" \
+      description="GCP Workbench - R 4.1.0 + Python + gsutil - No Go Runtime" \
       r.version="4.1.0" \
       security.patched="true" \
       go.status="completely-removed"
